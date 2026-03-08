@@ -18,6 +18,17 @@ function closePrice(row) {
   return row.adjusted_close ?? row.close_price
 }
 
+function toUtcMs(dateLike) {
+  return new Date(dateLike).getTime()
+}
+
+function formatYearMonth(ms) {
+  const d = new Date(ms)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  return `${y}/${m}`
+}
+
 function nearestIndex(points, targetX) {
   if (!points.length) return -1
   let lo = 0
@@ -58,7 +69,7 @@ function movingAverage(rows, period) {
     sum += v
     if (i >= period) sum -= values[i - period]
     const y = i >= period - 1 ? sum / period : null
-    return { x: i + 1, y }
+    return { x: toUtcMs(rows[i].trading_date), y }
   }).filter((p) => p.y !== null)
 }
 
@@ -71,7 +82,7 @@ async function toCanvas(node) {
   return html2canvas(node, { backgroundColor: '#040b17', scale: 2, useCORS: true })
 }
 
-export const InteractiveChart = memo(function InteractiveChart({ title, subtitle, series, unit = '$', bars = false }) {
+export const InteractiveChart = memo(function InteractiveChart({ title, subtitle, series, unit = '$', bars = false, xTickFormatter = (x) => String(Math.round(x)) }) {
   const [hover, setHover] = useState(null)
   const [enabled, setEnabled] = useState(() => Object.fromEntries(series.map((s) => [s.id, true])))
   const rafRef = useRef(null)
@@ -181,7 +192,7 @@ export const InteractiveChart = memo(function InteractiveChart({ title, subtitle
           {xTicks.map((x, i) => (
             <g key={`gx-${i}`}>
               <line y1={pad.t} y2={h - pad.b} x1={sx(x)} x2={sx(x)} className="grid v" />
-              <text x={sx(x) - 14} y={h - 16} className="axis">{Math.round(x)}</text>
+              <text x={sx(x) - 18} y={h - 16} className="axis">{xTickFormatter(x)}</text>
             </g>
           ))}
 
@@ -286,10 +297,10 @@ export default function App() {
     return rows.filter((r) => new Date(r.trading_date) >= cutoff)
   }, [rows, range])
 
-  const daily = useMemo(() => filteredRows.map((r, i) => ({ x: i + 1, y: closePrice(r) })), [filteredRows])
+  const daily = useMemo(() => filteredRows.map((r) => ({ x: toUtcMs(r.trading_date), y: closePrice(r) })), [filteredRows])
   const ma20 = useMemo(() => movingAverage(filteredRows, 20), [filteredRows])
   const ma50 = useMemo(() => movingAverage(filteredRows, 50), [filteredRows])
-  const volumes = useMemo(() => filteredRows.map((r, i) => ({ x: i + 1, y: Number(r.volume || 0) })), [filteredRows])
+  const volumes = useMemo(() => filteredRows.map((r) => ({ x: toUtcMs(r.trading_date), y: Number(r.volume || 0) })), [filteredRows])
   const dailyFast = useMemo(() => downsampleByStride(daily, 560), [daily])
   const ma20Fast = useMemo(() => downsampleByStride(ma20, 560), [ma20])
   const ma50Fast = useMemo(() => downsampleByStride(ma50, 560), [ma50])
@@ -393,6 +404,7 @@ export default function App() {
         <InteractiveChart
           title="Price Over Time"
           subtitle="Daily close with SMA overlays"
+          xTickFormatter={formatYearMonth}
           series={[
             { id: 'close', name: 'Daily Close', points: dailyFast, color: '#3ab0ff' },
             { id: 'ma20', name: 'SMA 20', points: ma20Fast, color: '#89c7ff', dashed: true, dot: 2 },
@@ -403,6 +415,7 @@ export default function App() {
         <InteractiveChart
           title="Trading Volume"
           subtitle="Volume bars over selected range"
+          xTickFormatter={formatYearMonth}
           series={[{ id: 'volume', name: 'Volume', points: volumeFast, color: '#1b69d6' }]}
           unit=""
           bars
