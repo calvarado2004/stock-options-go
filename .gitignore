@@ -1,0 +1,39 @@
+# Binaries
+stock-options
+stock-options-debug
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build outputs
+bin/
+dist/
+build/
+coverage.out
+
+# Databases / runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+
+# Go caches
+/tmp/go-build-cache/
+
+# IDE / hidden dirs
+.claude/
+.idea/
+.vscode/
+.DS_Store
+
+# Frontend artifacts
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Env files
+.env
+.env.*

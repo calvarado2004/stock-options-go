@@ -1,0 +1,40 @@
+services:
+  db:
+    image: alpine:3.20
+    container_name: stock-options-db
+    command: >
+      sh -c "mkdir -p /data && touch /data/stock_data.db && tail -f /dev/null"
+    volumes:
+      - stock_data:/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: stock-options-backend
+    depends_on:
+      - db
+    environment:
+      PORT: "8080"
+      DB_PATH: /app/data/stock_data.db
+      ALPHA_API_KEY: ${ALPHA_API_KEY:-}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - stock_data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: stock-options-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    restart: unless-stopped
+
+volumes:
+  stock_data:

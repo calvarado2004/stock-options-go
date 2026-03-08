@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stock-forecast-backend
+  labels:
+    app: stock-forecast-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stock-forecast-backend
+  template:
+    metadata:
+      labels:
+        app: stock-forecast-backend
+    spec:
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - stock-forecast-db
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: backend
+          image: calvarado2004/stock-forecast-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DB_PATH
+              value: /app/data/stock_data.db
+            - name: ALPHA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stock-forecast-secrets
+                  key: alpha_api_key
+                  optional: true
+          volumeMounts:
+            - name: db-data
+              mountPath: /app/data
+      volumes:
+        - name: db-data
+          persistentVolumeClaim:
+            claimName: data-stock-forecast-db-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stock-forecast-backend
+  labels:
+    app: stock-forecast-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: stock-forecast-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

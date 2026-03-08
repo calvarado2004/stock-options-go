@@ -1,0 +1,16 @@
+FROM --platform=linux/amd64 golang:1.24-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -o /out/stock-options .
+
+FROM --platform=linux/amd64 debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /out/stock-options /app/stock-options
+RUN mkdir -p /app/data
+ENV PORT=8080
+ENV DB_PATH=/app/data/stock_data.db
+EXPOSE 8080
+CMD ["/app/stock-options"]
