@@ -71,28 +71,21 @@ async function toCanvas(node) {
   return html2canvas(node, { backgroundColor: '#040b17', scale: 2, useCORS: true })
 }
 
-const InteractiveChart = memo(function InteractiveChart({ title, subtitle, series, unit = '$', bars = false }) {
+export const InteractiveChart = memo(function InteractiveChart({ title, subtitle, series, unit = '$', bars = false }) {
   const [hover, setHover] = useState(null)
   const [enabled, setEnabled] = useState(() => Object.fromEntries(series.map((s) => [s.id, true])))
   const rafRef = useRef(null)
   const lastMoveRef = useRef(0)
+
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+  }, [])
 
   const w = 1080
   const h = bars ? 290 : 390
   const pad = { t: 24, r: 24, b: 52, l: 64 }
 
   const activeSeries = series.filter((s) => enabled[s.id] && s.points.length > 0)
-  if (!activeSeries.length) {
-    return (
-      <section className="panel chart-wrap">
-        <div className="chart-head">
-          <h3>{title}</h3>
-          <p>{subtitle}</p>
-        </div>
-        <div className="empty">No chart data available.</div>
-      </section>
-    )
-  }
 
   const allPoints = activeSeries.flatMap((s) => s.points)
   const minX = Math.min(...allPoints.map((p) => p.x))
@@ -126,63 +119,17 @@ const InteractiveChart = memo(function InteractiveChart({ title, subtitle, serie
     return { rows, x: rows[0].point.px }
   })()
 
-  useEffect(() => () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-  }, [])
-
-  const staticSvgLayer = useMemo(() => (
-    <>
-      {yTicks.map((y, i) => (
-        <g key={`gy-${i}`}>
-          <line x1={pad.l} x2={w - pad.r} y1={sy(y)} y2={sy(y)} className="grid" />
-          <text x={8} y={sy(y) + 4} className="axis">{unit}{money(y)}</text>
-        </g>
-      ))}
-      {xTicks.map((x, i) => (
-        <g key={`gx-${i}`}>
-          <line y1={pad.t} y2={h - pad.b} x1={sx(x)} x2={sx(x)} className="grid v" />
-          <text x={sx(x) - 14} y={h - 16} className="axis">{Math.round(x)}</text>
-        </g>
-      ))}
-
-      {bars && projectedSeries.map((s) => s.projected.map((p, idx) => (
-        <rect
-          key={`${s.id}-${idx}`}
-          x={p.px - 1.8}
-          y={p.py}
-          width={3.6}
-          height={h - pad.b - p.py}
-          className="bar"
-          style={{ fill: s.color }}
-        />
-      )))}
-
-      {!bars && projectedSeries.map((s) => {
-        const path = s.projected.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.px} ${p.py}`).join(' ')
-        return (
-          <path
-            key={s.id}
-            d={path}
-            className={s.dashed ? 'series-dashed' : 'series'}
-            style={{ stroke: s.color }}
-          />
-        )
-      })}
-
-      {showDots && projectedSeries.map((s) =>
-        s.projected.map((p) => (
-          <circle
-            key={`${s.id}-${p.x}-${p.y}`}
-            cx={p.px}
-            cy={p.py}
-            r={s.dot || 2.8}
-            className="dot"
-            style={{ fill: s.color }}
-          />
-        ))
-      )}
-    </>
-  ), [bars, h, pad.b, pad.l, pad.r, pad.t, projectedSeries, showDots, unit, w, xTicks, yTicks])
+  if (!activeSeries.length) {
+    return (
+      <section className="panel chart-wrap">
+        <div className="chart-head">
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </div>
+        <div className="empty">No chart data available.</div>
+      </section>
+    )
+  }
 
   return (
     <section className="panel chart-wrap">
@@ -225,7 +172,55 @@ const InteractiveChart = memo(function InteractiveChart({ title, subtitle, serie
         onMouseLeave={() => setHover(null)}
       >
         <svg viewBox={`0 0 ${w} ${h}`}>
-          {staticSvgLayer}
+          {yTicks.map((y, i) => (
+            <g key={`gy-${i}`}>
+              <line x1={pad.l} x2={w - pad.r} y1={sy(y)} y2={sy(y)} className="grid" />
+              <text x={8} y={sy(y) + 4} className="axis">{unit}{money(y)}</text>
+            </g>
+          ))}
+          {xTicks.map((x, i) => (
+            <g key={`gx-${i}`}>
+              <line y1={pad.t} y2={h - pad.b} x1={sx(x)} x2={sx(x)} className="grid v" />
+              <text x={sx(x) - 14} y={h - 16} className="axis">{Math.round(x)}</text>
+            </g>
+          ))}
+
+          {bars && projectedSeries.map((s) => s.projected.map((p, idx) => (
+            <rect
+              key={`${s.id}-${idx}`}
+              x={p.px - 1.8}
+              y={p.py}
+              width={3.6}
+              height={h - pad.b - p.py}
+              className="bar"
+              style={{ fill: s.color }}
+            />
+          )))}
+
+          {!bars && projectedSeries.map((s) => {
+            const path = s.projected.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.px} ${p.py}`).join(' ')
+            return (
+              <path
+                key={s.id}
+                d={path}
+                className={s.dashed ? 'series-dashed' : 'series'}
+                style={{ stroke: s.color }}
+              />
+            )
+          })}
+
+          {showDots && projectedSeries.map((s) =>
+            s.projected.map((p) => (
+              <circle
+                key={`${s.id}-${p.x}-${p.y}`}
+                cx={p.px}
+                cy={p.py}
+                r={s.dot || 2.8}
+                className="dot"
+                style={{ fill: s.color }}
+              />
+            ))
+          )}
 
           {hoverPayload && <line x1={hoverPayload.x} x2={hoverPayload.x} y1={pad.t} y2={h - pad.b} className="crosshair" />}
         </svg>
