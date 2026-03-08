@@ -83,7 +83,7 @@ spec:
             failureThreshold: 6
           volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
+              mountPath: /var/lib/postgresql
             - name: init-sql
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
