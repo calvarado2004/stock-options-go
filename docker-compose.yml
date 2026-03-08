@@ -32,6 +32,8 @@ services:
     container_name: stock-options-frontend
     depends_on:
       - backend
+    environment:
+      API_UPSTREAM: backend:8080
     ports:
       - "${FRONTEND_PORT:-5173}:80"
     restart: unless-stopped

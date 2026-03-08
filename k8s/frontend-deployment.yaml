@@ -18,6 +18,9 @@ spec:
         - name: frontend
           image: calvarado2004/stock-forecast-frontend:latest
           imagePullPolicy: Always
+          env:
+            - name: API_UPSTREAM
+              value: stock-forecast-backend:8080
           ports:
             - containerPort: 80
 ---

@@ -196,6 +196,11 @@ Services:
 - backend API: `http://localhost:8080`
 - frontend UI: `http://localhost:5173`
 
+Frontend container uses `API_UPSTREAM` to route `/api/*` to backend.
+Defaults:
+- Docker Compose: `backend:8080`
+- Kubernetes: `stock-forecast-backend:8080`
+
 Optional custom ports:
 
 ```bash
