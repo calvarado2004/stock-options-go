@@ -5,7 +5,7 @@ Backend API that retrieves and stores historical stock data and performs in-hous
 ## What It Does
 
 - Ingests approximately 5 years of daily historical stock data for a ticker (e.g., `PSTG`)
-- Stores data in local SQLite (`stock_data.db`) with upsert semantics
+- Stores data in a relational DB with upsert semantics
 - Reuses cached data when local data is sufficiently up to date
 - Performs local linear regression forecasting (no external forecasting service)
 - Exposes REST endpoints for ingestion, historical data query, and forecast retrieval
@@ -19,7 +19,7 @@ HTTP API (pkg/api)
       - Yahoo Finance (no API key in current implementation)
       - Stooq CSV fallback
   -> Storage (pkg/storage)
-      - SQLite via GORM
+      - GORM with configurable driver (`sqlite` local fallback, `postgres` for service-backed DB)
   -> Forecast Engine (pkg/forecast)
       - LinearRegressionForecaster (local calculations)
 ```
@@ -38,7 +38,7 @@ HTTP API (pkg/api)
 │   ├── forecast/    # Local forecasting engine(s)
 │   ├── model/       # GORM/data models
 │   └── storage/     # Persistence and forecast orchestration
-└── stock_data.db    # SQLite DB (created at runtime)
+└── stock_data.db    # local SQLite fallback (when DB_DRIVER=sqlite)
 ```
 
 ## Requirements
@@ -111,7 +111,7 @@ Example response:
 
 ### `GET /data?ticker=SYMBOL&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 
-Returns stored historical rows from SQLite.
+Returns stored historical rows from configured DB.
 
 ### `GET /forecast?ticker=SYMBOL`
 
@@ -192,7 +192,7 @@ docker compose up -d --build
 ```
 
 Services:
-- db container (SQLite volume + file init)
+- db container (PostgreSQL service)
 - backend API: `http://localhost:8080`
 - frontend UI: `http://localhost:5173`
 
@@ -207,7 +207,7 @@ Optional custom ports:
 BACKEND_PORT=18080 FRONTEND_PORT=15173 docker compose up -d --build
 ```
 
-Persistent DB is stored in Docker volume `stock_data` and shared between `db` and `backend`.
+Persistent DB is stored in Docker volume `stock_pg_data`.
 
 Stop:
 
@@ -242,8 +242,17 @@ Kubernetes manifests are in `k8s/` and include:
 - DB StatefulSet with PVC (`RWO`, `10Gi`, StorageClass `px-csi-db`)
 - Backend Deployment + Service
 - Frontend Deployment + Service
+- Secret templates for DB/backend env and DB init SQL shell
 
-Apply:
+Create secrets first:
+
+```bash
+cp k8s/secrets.example.yaml k8s/secrets.yaml
+# edit k8s/secrets.yaml with real passwords and ALPHA_API_KEY
+kubectl apply -f k8s/secrets.yaml
+```
+
+Apply workloads:
 
 ```bash
 kubectl apply -f k8s/db-statefulset.yaml
@@ -255,12 +264,10 @@ Images referenced by the deployments:
 - `calvarado2004/stock-forecast-backend:latest`
 - `calvarado2004/stock-forecast-frontend:latest`
 
-Optional Alpha key secret:
-
-```bash
-kubectl create secret generic stock-forecast-secrets \
-  --from-literal=alpha_api_key=\"<your-alpha-key>\"
-```
+Hardening details:
+- Backend and DB both use `envFrom` Secrets.
+- DB bootstraps app role/database from Secret mounted at `/docker-entrypoint-initdb.d`.
+- Backend exposes `/healthz` and has startup/readiness/liveness probes.
 
 ## License
 

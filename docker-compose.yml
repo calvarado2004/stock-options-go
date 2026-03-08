@@ -1,11 +1,20 @@
 services:
   db:
-    image: alpine:3.20
+    image: postgres:16-alpine
     container_name: stock-options-db
-    command: >
-      sh -c "mkdir -p /data && touch /data/stock_data.db && tail -f /dev/null"
+    environment:
+      POSTGRES_DB: stock_forecast
+      POSTGRES_USER: stockuser
+      POSTGRES_PASSWORD: stockpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockuser -d stock_forecast"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes:
-      - stock_data:/data
+      - stock_pg_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
     restart: unless-stopped
 
   backend:
@@ -14,15 +23,16 @@ services:
       dockerfile: Dockerfile.backend
     container_name: stock-options-backend
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       PORT: "8080"
-      DB_PATH: /app/data/stock_data.db
+      DB_DRIVER: postgres
+      DB_DSN: host=db port=5432 user=stockuser password=stockpass dbname=stock_forecast sslmode=disable TimeZone=UTC
+      DB_PATH: ""
       ALPHA_API_KEY: ${ALPHA_API_KEY:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
-    volumes:
-      - stock_data:/app/data
     restart: unless-stopped
 
   frontend:
@@ -39,4 +49,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  stock_data:
+  stock_pg_data:

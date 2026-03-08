@@ -66,3 +66,19 @@ func TestRouter(t *testing.T) {
 		t.Errorf("Expected status %d, got %d", http.StatusOK, status)
 	}
 }
+
+func TestHealthEndpoint(t *testing.T) {
+	router := newTestRouter(t)
+
+	req, err := http.NewRequest("GET", "/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if status := recorder.Code; status != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, status)
+	}
+}

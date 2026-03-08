@@ -5,13 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BACKEND_PORT="${BACKEND_PORT:-18080}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-stock-options-it}"
 cleanup() {
-  BACKEND_PORT="$BACKEND_PORT" docker compose down >/dev/null 2>&1 || true
+  COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" BACKEND_PORT="$BACKEND_PORT" docker compose down -v >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-echo "[integration] building and starting backend in docker compose"
-BACKEND_PORT="$BACKEND_PORT" docker compose up -d --build backend
+echo "[integration] building and starting db + backend in docker compose"
+COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" BACKEND_PORT="$BACKEND_PORT" docker compose up -d --build db backend
 
 echo "[integration] waiting for backend health"
 for i in {1..30}; do
@@ -21,7 +22,7 @@ for i in {1..30}; do
   sleep 2
   if [[ "$i" == "30" ]]; then
     echo "backend did not become ready in time"
-    BACKEND_PORT="$BACKEND_PORT" docker compose logs backend
+    COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" BACKEND_PORT="$BACKEND_PORT" docker compose logs backend
     exit 1
   fi
 done

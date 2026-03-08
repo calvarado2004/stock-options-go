@@ -3,11 +3,13 @@ package storage
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"stock-options/pkg/forecast"
 	"stock-options/pkg/model"
 
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,7 +20,31 @@ type Database struct {
 }
 
 func NewDatabase(dbPath string) (*Database, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	return NewDatabaseWithConfig("sqlite", "", dbPath)
+}
+
+func NewDatabaseWithConfig(driver string, dsn string, dbPath string) (*Database, error) {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "" {
+		driver = "sqlite"
+	}
+
+	var (
+		db  *gorm.DB
+		err error
+	)
+	switch driver {
+	case "postgres", "postgresql":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, fmt.Errorf("DB_DSN is required when DB_DRIVER is postgres")
+		}
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	default:
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = "stock_data.db"
+		}
+		db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -137,4 +163,12 @@ func (d *Database) GenerateForecast(ticker string) (*model.ForecastResult, error
 		return nil, err
 	}
 	return forecastResult, nil
+}
+
+func (d *Database) Ping() error {
+	sqlDB, err := d.DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Ping()
 }

@@ -32,11 +32,13 @@ type ingestResponse struct {
 }
 
 func NewRouter() *Router {
+	dbDriver := os.Getenv("DB_DRIVER")
+	dbDSN := os.Getenv("DB_DSN")
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "stock_data.db"
 	}
-	db, err := storage.NewDatabase(dbPath)
+	db, err := storage.NewDatabaseWithConfig(dbDriver, dbDSN, dbPath)
 	if err != nil {
 		panic(err)
 	}
@@ -60,6 +62,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	router.HandleFunc("/ingest", r.ingestHandler).Methods("POST")
 	router.HandleFunc("/data", r.dataHandler).Methods("GET")
 	router.HandleFunc("/forecast", r.forecastHandler).Methods("GET")
+	router.HandleFunc("/healthz", r.healthHandler).Methods("GET")
 
 	router.ServeHTTP(w, req)
 }
@@ -212,6 +215,18 @@ func (r *Router) forecastHandler(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(forecast); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (r *Router) healthHandler(w http.ResponseWriter, req *http.Request) {
+	if err := r.db.Ping(); err != nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
 	}
 }

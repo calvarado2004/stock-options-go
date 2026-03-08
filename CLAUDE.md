@@ -48,6 +48,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - `POST /ingest?ticker=SYMBOL`
 - `GET /data?ticker=SYMBOL&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 - `GET /forecast?ticker=SYMBOL`
+- `GET /healthz`
 
 ## Current Implementation Notes
 
@@ -56,8 +57,17 @@ Design and implement a backend API that retrieves and stores five years of histo
   - Yahoo Finance (no API key in current implementation)
   - Stooq fallback
 - Alpha Vantage is one possible provider among several supported sources
-- Storage (`pkg/storage`): SQLite via GORM, upsert by `(ticker, trading_date)`
+- Storage (`pkg/storage`): configurable DB driver via GORM
+  - local fallback: SQLite
+  - container/K8s baseline: PostgreSQL service
 - Forecast engine (`pkg/forecast`): local linear regression forecaster
+
+### Kubernetes Hardened Baseline
+
+- Backend and DB use `envFrom` Kubernetes Secrets
+- PostgreSQL bootstrap uses an init script mounted from Secret at `/docker-entrypoint-initdb.d`
+- Backend has startup/readiness/liveness probes on `GET /healthz`
+- DB has startup/readiness/liveness probes using `pg_isready`
 
 ## Non-Goals / Constraints
 
