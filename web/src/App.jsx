@@ -1,6 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
-import html2canvas from 'html2canvas'
-import { jsPDF } from 'jspdf'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 const RANGE_OPTIONS = [
   { id: '1Y', years: 1 },
@@ -22,16 +20,34 @@ function closePrice(row) {
 
 function nearestIndex(points, targetX) {
   if (!points.length) return -1
-  let best = 0
-  let bestDist = Math.abs(points[0].px - targetX)
-  for (let i = 1; i < points.length; i += 1) {
-    const d = Math.abs(points[i].px - targetX)
-    if (d < bestDist) {
-      best = i
-      bestDist = d
+  let lo = 0
+  let hi = points.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const px = points[mid].px
+    if (px < targetX) {
+      lo = mid + 1
+    } else if (px > targetX) {
+      hi = mid - 1
+    } else {
+      return mid
     }
   }
-  return best
+  if (lo >= points.length) return points.length - 1
+  if (lo <= 0) return 0
+  return Math.abs(points[lo].px - targetX) < Math.abs(points[lo - 1].px - targetX) ? lo : lo - 1
+}
+
+function downsampleByStride(points, maxPoints) {
+  if (points.length <= maxPoints) return points
+  const step = Math.ceil(points.length / maxPoints)
+  const sampled = []
+  for (let i = 0; i < points.length; i += step) {
+    sampled.push(points[i])
+  }
+  const last = points[points.length - 1]
+  if (sampled[sampled.length - 1] !== last) sampled.push(last)
+  return sampled
 }
 
 function movingAverage(rows, period) {
@@ -51,12 +67,15 @@ function getApiBase() {
 }
 
 async function toCanvas(node) {
+  const { default: html2canvas } = await import('html2canvas')
   return html2canvas(node, { backgroundColor: '#040b17', scale: 2, useCORS: true })
 }
 
-function InteractiveChart({ title, subtitle, series, unit = '$', bars = false }) {
+const InteractiveChart = memo(function InteractiveChart({ title, subtitle, series, unit = '$', bars = false }) {
   const [hover, setHover] = useState(null)
   const [enabled, setEnabled] = useState(() => Object.fromEntries(series.map((s) => [s.id, true])))
+  const rafRef = useRef(null)
+  const lastMoveRef = useRef(0)
 
   const w = 1080
   const h = bars ? 290 : 390
@@ -91,9 +110,11 @@ function InteractiveChart({ title, subtitle, series, unit = '$', bars = false })
 
   const xTicks = Array.from({ length: 6 }, (_, i) => minX + ((maxX - minX) / 5) * i)
   const yTicks = Array.from({ length: 6 }, (_, i) => minY + ((maxY - minY) / 5) * i)
+  const showDots = !bars && allPoints.length <= 320
+  const enableHover = !bars || allPoints.length <= 220
 
   const hoverPayload = (() => {
-    if (!hover) return null
+    if (!enableHover || !hover) return null
     const rows = projectedSeries
       .map((s) => {
         const idx = nearestIndex(s.projected, hover.x)
@@ -104,6 +125,64 @@ function InteractiveChart({ title, subtitle, series, unit = '$', bars = false })
     if (!rows.length) return null
     return { rows, x: rows[0].point.px }
   })()
+
+  useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  const staticSvgLayer = useMemo(() => (
+    <>
+      {yTicks.map((y, i) => (
+        <g key={`gy-${i}`}>
+          <line x1={pad.l} x2={w - pad.r} y1={sy(y)} y2={sy(y)} className="grid" />
+          <text x={8} y={sy(y) + 4} className="axis">{unit}{money(y)}</text>
+        </g>
+      ))}
+      {xTicks.map((x, i) => (
+        <g key={`gx-${i}`}>
+          <line y1={pad.t} y2={h - pad.b} x1={sx(x)} x2={sx(x)} className="grid v" />
+          <text x={sx(x) - 14} y={h - 16} className="axis">{Math.round(x)}</text>
+        </g>
+      ))}
+
+      {bars && projectedSeries.map((s) => s.projected.map((p, idx) => (
+        <rect
+          key={`${s.id}-${idx}`}
+          x={p.px - 1.8}
+          y={p.py}
+          width={3.6}
+          height={h - pad.b - p.py}
+          className="bar"
+          style={{ fill: s.color }}
+        />
+      )))}
+
+      {!bars && projectedSeries.map((s) => {
+        const path = s.projected.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.px} ${p.py}`).join(' ')
+        return (
+          <path
+            key={s.id}
+            d={path}
+            className={s.dashed ? 'series-dashed' : 'series'}
+            style={{ stroke: s.color }}
+          />
+        )
+      })}
+
+      {showDots && projectedSeries.map((s) =>
+        s.projected.map((p) => (
+          <circle
+            key={`${s.id}-${p.x}-${p.y}`}
+            cx={p.px}
+            cy={p.py}
+            r={s.dot || 2.8}
+            className="dot"
+            style={{ fill: s.color }}
+          />
+        ))
+      )}
+    </>
+  ), [bars, h, pad.b, pad.l, pad.r, pad.t, projectedSeries, showDots, unit, w, xTicks, yTicks])
 
   return (
     <section className="panel chart-wrap">
@@ -129,61 +208,24 @@ function InteractiveChart({ title, subtitle, series, unit = '$', bars = false })
       <div
         className="chart-box"
         onMouseMove={(e) => {
+          if (!enableHover) return
+          const now = performance.now()
+          if (now - lastMoveRef.current < 40) return
+          lastMoveRef.current = now
           const rect = e.currentTarget.getBoundingClientRect()
-          setHover({ x: ((e.clientX - rect.left) / rect.width) * w })
+          const nextX = ((e.clientX - rect.left) / rect.width) * w
+          if (rafRef.current) cancelAnimationFrame(rafRef.current)
+          rafRef.current = requestAnimationFrame(() => {
+            setHover((prev) => {
+              if (prev && Math.abs(prev.x - nextX) < 1) return prev
+              return { x: nextX }
+            })
+          })
         }}
         onMouseLeave={() => setHover(null)}
       >
         <svg viewBox={`0 0 ${w} ${h}`}>
-          {yTicks.map((y, i) => (
-            <g key={`gy-${i}`}>
-              <line x1={pad.l} x2={w - pad.r} y1={sy(y)} y2={sy(y)} className="grid" />
-              <text x={8} y={sy(y) + 4} className="axis">{unit}{money(y)}</text>
-            </g>
-          ))}
-          {xTicks.map((x, i) => (
-            <g key={`gx-${i}`}>
-              <line y1={pad.t} y2={h - pad.b} x1={sx(x)} x2={sx(x)} className="grid v" />
-              <text x={sx(x) - 14} y={h - 16} className="axis">{Math.round(x)}</text>
-            </g>
-          ))}
-
-          {bars && projectedSeries.map((s) => s.projected.map((p, idx) => (
-            <rect
-              key={`${s.id}-${idx}`}
-              x={p.px - 1.8}
-              y={p.py}
-              width={3.6}
-              height={h - pad.b - p.py}
-              className="bar"
-              style={{ fill: s.color }}
-            />
-          )))}
-
-          {!bars && projectedSeries.map((s) => {
-            const path = s.projected.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.px} ${p.py}`).join(' ')
-            return (
-              <path
-                key={s.id}
-                d={path}
-                className={s.dashed ? 'series-dashed' : 'series'}
-                style={{ stroke: s.color }}
-              />
-            )
-          })}
-
-          {!bars && projectedSeries.map((s) =>
-            s.projected.map((p) => (
-              <circle
-                key={`${s.id}-${p.x}-${p.y}`}
-                cx={p.px}
-                cy={p.py}
-                r={s.dot || 2.8}
-                className="dot"
-                style={{ fill: s.color }}
-              />
-            ))
-          )}
+          {staticSvgLayer}
 
           {hoverPayload && <line x1={hoverPayload.x} x2={hoverPayload.x} y1={pad.t} y2={h - pad.b} className="crosshair" />}
         </svg>
@@ -202,7 +244,7 @@ function InteractiveChart({ title, subtitle, series, unit = '$', bars = false })
       </div>
     </section>
   )
-}
+})
 
 export default function App() {
   const [ticker, setTicker] = useState('PSTG')
@@ -253,6 +295,10 @@ export default function App() {
   const ma20 = useMemo(() => movingAverage(filteredRows, 20), [filteredRows])
   const ma50 = useMemo(() => movingAverage(filteredRows, 50), [filteredRows])
   const volumes = useMemo(() => filteredRows.map((r, i) => ({ x: i + 1, y: Number(r.volume || 0) })), [filteredRows])
+  const dailyFast = useMemo(() => downsampleByStride(daily, 560), [daily])
+  const ma20Fast = useMemo(() => downsampleByStride(ma20, 560), [ma20])
+  const ma50Fast = useMemo(() => downsampleByStride(ma50, 560), [ma50])
+  const volumeFast = useMemo(() => downsampleByStride(volumes, 220), [volumes])
 
   const annualAvg = useMemo(() => {
     const perYear = new Map()
@@ -297,6 +343,7 @@ export default function App() {
 
   const exportPDF = async () => {
     if (!exportRef.current) return
+    const { jsPDF } = await import('jspdf')
     const canvas = await toCanvas(exportRef.current)
     const img = canvas.toDataURL('image/png')
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
@@ -352,16 +399,16 @@ export default function App() {
           title="Price Over Time"
           subtitle="Daily close with SMA overlays"
           series={[
-            { id: 'close', name: 'Daily Close', points: daily, color: '#3ab0ff' },
-            { id: 'ma20', name: 'SMA 20', points: ma20, color: '#89c7ff', dashed: true, dot: 2 },
-            { id: 'ma50', name: 'SMA 50', points: ma50, color: '#2bd7ff', dashed: true, dot: 2 }
+            { id: 'close', name: 'Daily Close', points: dailyFast, color: '#3ab0ff' },
+            { id: 'ma20', name: 'SMA 20', points: ma20Fast, color: '#89c7ff', dashed: true, dot: 2 },
+            { id: 'ma50', name: 'SMA 50', points: ma50Fast, color: '#2bd7ff', dashed: true, dot: 2 }
           ]}
         />
 
         <InteractiveChart
           title="Trading Volume"
           subtitle="Volume bars over selected range"
-          series={[{ id: 'volume', name: 'Volume', points: volumes, color: '#1b69d6' }]}
+          series={[{ id: 'volume', name: 'Volume', points: volumeFast, color: '#1b69d6' }]}
           unit=""
           bars
         />

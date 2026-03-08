@@ -45,7 +45,7 @@ services:
     environment:
       API_UPSTREAM: backend:8080
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_PORT:-5173}:8080"
     restart: unless-stopped
 
 volumes:
