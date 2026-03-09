@@ -266,6 +266,7 @@ export default function App() {
   const [rows, setRows] = useState([])
   const [forecast, setForecast] = useState(null)
   const [analysis, setAnalysis] = useState(null)
+  const [analysisError, setAnalysisError] = useState('')
   const exportRef = useRef(null)
 
   const load = async () => {
@@ -289,8 +290,13 @@ export default function App() {
       setForecast(await forecastRes.json())
 
       const analysisRes = await fetch(`${api}/analysis?ticker=${encodeURIComponent(symbol)}`)
-      if (!analysisRes.ok) throw new Error(await analysisRes.text())
-      setAnalysis(await analysisRes.json())
+      if (analysisRes.ok) {
+        setAnalysis(await analysisRes.json())
+        setAnalysisError('')
+      } else {
+        setAnalysis(null)
+        setAnalysisError('Advanced analysis is not available for this ticker yet.')
+      }
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -351,6 +357,16 @@ export default function App() {
   const mcP10 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p10 })), [analysis])
   const mcP50 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p50 })), [analysis])
   const mcP90 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p90 })), [analysis])
+  const ar1Projection = useMemo(() => {
+    if (!analysis) return []
+    const start = analysis.current_price
+    const daily = analysis.ar1.forecast_return_1d || 0
+    const pts = [{ x: 0, y: start }]
+    for (let d = 1; d <= 30; d++) {
+      pts.push({ x: d, y: start * Math.exp(daily * d) })
+    }
+    return pts
+  }, [analysis])
 
   const exportPNG = async () => {
     if (!exportRef.current) return
@@ -420,6 +436,7 @@ export default function App() {
         <article className="panel metric"><span>MC Annual Drift</span><strong>{analysis ? `${(analysis.monte_carlo.drift_annual * 100).toFixed(2)}%` : '-'}</strong></article>
         <article className="panel metric"><span>MC Annual Volatility</span><strong>{analysis ? `${(analysis.monte_carlo.volatility_annual * 100).toFixed(2)}%` : '-'}</strong></article>
       </section>
+      {analysisError && <section className="panel error">{analysisError}</section>}
 
       <div ref={exportRef}>
         <InteractiveChart
@@ -461,6 +478,13 @@ export default function App() {
             { id: 'mc-p50', name: 'P50', points: mcP50, color: '#4bb3ff', dot: 3 },
             { id: 'mc-p90', name: 'P90', points: mcP90, color: '#77d6ff', dashed: true, dot: 2 }
           ]}
+        />
+
+        <InteractiveChart
+          title="AR(1) 30-Day Price Path"
+          subtitle="Projected expected path from AR(1) daily-return model"
+          xTickFormatter={(d) => `${Math.round(d)}D`}
+          series={[{ id: 'ar1-path', name: 'AR(1) Expected Path', points: ar1Projection, color: '#63c6ff' }]}
         />
       </div>
     </div>
