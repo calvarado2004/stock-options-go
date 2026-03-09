@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -210,5 +211,86 @@ func TestIngestUsesCacheFirstWithoutCallingProvider(t *testing.T) {
 	}
 	if payload["using_cached_data"] != true {
 		t.Fatalf("expected using_cached_data true, got %#v", payload["using_cached_data"])
+	}
+}
+
+type mockExternalMLClient struct{}
+
+func (m *mockExternalMLClient) PushAnalysisAndForecast(ctx context.Context, ticker string, forecast *model.ForecastResult, analysis *model.AdvancedAnalysis) (*model.ExternalMLInsight, error) {
+	return &model.ExternalMLInsight{
+		Provider: "test-ml",
+		Status:   "ok",
+		Recommendation: model.ExternalMLRecommendation{
+			Action:     "BUY",
+			Confidence: "High",
+			ScoreDelta: 2,
+			Rationale:  []string{"Neural model trend is positive"},
+		},
+	}, nil
+}
+
+func TestMLAnalysisEndpoint(t *testing.T) {
+	db, err := storage.NewDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouterWithDependenciesAndClients(db, &mockProvider{}, nil, &mockExternalMLClient{})
+
+	ingestReq := httptest.NewRequest(http.MethodPost, "/ingest?ticker=TEST", nil)
+	ingestRec := httptest.NewRecorder()
+	router.ServeHTTP(ingestRec, ingestReq)
+	if ingestRec.Code != http.StatusOK {
+		t.Fatalf("ingest failed with status=%d body=%s", ingestRec.Code, ingestRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/ml-analysis?ticker=TEST", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var analysis model.AdvancedAnalysis
+	if err := json.Unmarshal(rec.Body.Bytes(), &analysis); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if analysis.ExternalML == nil || analysis.ExternalML.Provider != "test-ml" {
+		t.Fatalf("expected external ml payload, got %+v", analysis.ExternalML)
+	}
+	if analysis.Signal.Action != "BUY" {
+		t.Fatalf("expected BUY action from external recommendation, got %s", analysis.Signal.Action)
+	}
+	if analysis.Signal.GeneratedBy == "" {
+		t.Fatalf("expected generated_by to be set")
+	}
+}
+
+func TestAnalysisIncludeMLQuery(t *testing.T) {
+	db, err := storage.NewDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouterWithDependenciesAndClients(db, &mockProvider{}, nil, &mockExternalMLClient{})
+
+	ingestReq := httptest.NewRequest(http.MethodPost, "/ingest?ticker=TEST", nil)
+	ingestRec := httptest.NewRecorder()
+	router.ServeHTTP(ingestRec, ingestReq)
+	if ingestRec.Code != http.StatusOK {
+		t.Fatalf("ingest failed with status=%d body=%s", ingestRec.Code, ingestRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/analysis?ticker=TEST&include_ml=true", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var analysis model.AdvancedAnalysis
+	if err := json.Unmarshal(rec.Body.Bytes(), &analysis); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if analysis.ExternalML == nil {
+		t.Fatalf("expected external_ml insight in response")
 	}
 }

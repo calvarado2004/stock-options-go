@@ -81,6 +81,7 @@ type AdvancedAnalysis struct {
 	AR1          AR1Analysis        `json:"ar1"`
 	DuPont       DuPontAnalysis     `json:"dupont"`
 	Signal       TradeSignal        `json:"signal"`
+	ExternalML   *ExternalMLInsight `json:"external_ml,omitempty"`
 }
 
 type TradeSignal struct {
@@ -90,4 +91,22 @@ type TradeSignal struct {
 	Reasons     []string `json:"reasons"`
 	Disclaimer  string   `json:"disclaimer"`
 	GeneratedBy string   `json:"generated_by"`
+}
+
+type ExternalMLRecommendation struct {
+	Action     string   `json:"action,omitempty"` // BUY | HOLD | SELL
+	Confidence string   `json:"confidence,omitempty"`
+	ScoreDelta int      `json:"score_delta,omitempty"`
+	Rationale  []string `json:"rationale,omitempty"`
+}
+
+type ExternalMLInsight struct {
+	Provider       string                   `json:"provider,omitempty"`
+	Model          string                   `json:"model,omitempty"`
+	Status         string                   `json:"status"`
+	Message        string                   `json:"message,omitempty"`
+	RequestedAt    time.Time                `json:"requested_at"`
+	ReceivedAt     time.Time                `json:"received_at,omitempty"`
+	Recommendation ExternalMLRecommendation `json:"recommendation,omitempty"`
+	Raw            map[string]interface{}   `json:"raw,omitempty"`
 }

@@ -50,6 +50,20 @@ body {
   color: #fff; font-weight: 700; letter-spacing: 0.01em; cursor: pointer;
 }
 .controls button:disabled { opacity: 0.72; cursor: default; }
+.ml-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #c6ddff;
+  font-size: 0.88rem;
+  padding: 8px 10px;
+  border: 1px solid #29578f;
+  border-radius: 10px;
+  background: #08172f;
+}
+.ml-toggle input {
+  accent-color: #2b78ea;
+}
 
 .range-group { display: inline-flex; background: #091327; border: 1px solid #20497f; border-radius: 11px; padding: 3px; }
 .range-btn { padding: 8px 10px; background: transparent; font-size: 0.8rem; color: #b7d4ff; }

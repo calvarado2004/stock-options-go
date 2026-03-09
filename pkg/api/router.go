@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 
 	"stock-options/pkg/data"
 	"stock-options/pkg/forecast"
+	"stock-options/pkg/ml"
 	"stock-options/pkg/model"
 	"stock-options/pkg/storage"
 
@@ -21,6 +23,7 @@ type Router struct {
 	db                 *storage.Database
 	dataProvider       data.StockDataProvider
 	secFundamentalsCli *data.SECFundamentalsClient
+	externalMLClient   ml.Client
 }
 
 type ingestResponse struct {
@@ -52,6 +55,7 @@ func NewRouter() *Router {
 		db:                 db,
 		dataProvider:       dataProvider,
 		secFundamentalsCli: data.NewSECFundamentalsClient(os.Getenv("SEC_USER_AGENT")),
+		externalMLClient:   ml.NewHTTPClientFromEnv(),
 	}
 }
 
@@ -62,6 +66,15 @@ func NewRouterWithDependencies(db *storage.Database, provider data.StockDataProv
 	}
 }
 
+func NewRouterWithDependenciesAndClients(db *storage.Database, provider data.StockDataProvider, sec *data.SECFundamentalsClient, externalML ml.Client) *Router {
+	return &Router{
+		db:                 db,
+		dataProvider:       provider,
+		secFundamentalsCli: sec,
+		externalMLClient:   externalML,
+	}
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	router := mux.NewRouter()
 
@@ -69,6 +82,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	router.HandleFunc("/data", r.dataHandler).Methods("GET")
 	router.HandleFunc("/forecast", r.forecastHandler).Methods("GET")
 	router.HandleFunc("/analysis", r.analysisHandler).Methods("GET")
+	router.HandleFunc("/ml-analysis", r.mlAnalysisHandler).Methods("POST")
 	router.HandleFunc("/healthz", r.healthHandler).Methods("GET")
 
 	router.ServeHTTP(w, req)
@@ -246,10 +260,46 @@ func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	analysis, err := r.db.GenerateAdvancedAnalysis(ticker)
+	analysis, err := r.buildAnalysis(req.Context(), ticker, parseBool(req.URL.Query().Get("include_ml")))
 	if err != nil {
 		http.Error(w, "No advanced analysis available for this ticker", http.StatusNotFound)
 		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analysis); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (r *Router) mlAnalysisHandler(w http.ResponseWriter, req *http.Request) {
+	ticker := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("ticker")))
+	if ticker == "" {
+		http.Error(w, "Ticker parameter is required", http.StatusBadRequest)
+		return
+	}
+	if r.externalMLClient == nil {
+		http.Error(w, "External ML service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	analysis, err := r.buildAnalysis(req.Context(), ticker, true)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to build ML analysis for %s: %v", ticker, err), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analysis); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (r *Router) buildAnalysis(ctx context.Context, ticker string, includeExternalML bool) (*model.AdvancedAnalysis, error) {
+	analysis, err := r.db.GenerateAdvancedAnalysis(ticker)
+	if err != nil {
+		return nil, err
 	}
 	if r.secFundamentalsCli != nil {
 		if dupont, dupontErr := r.secFundamentalsCli.GetDuPontAnalysis(ticker); dupontErr == nil && dupont != nil {
@@ -257,11 +307,71 @@ func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
 			analysis.Signal = forecast.EvaluateTradeSignal(analysis.CurrentPrice, analysis.MonteCarlo, analysis.AR1, analysis.DuPont)
 		}
 	}
+	if !includeExternalML {
+		return analysis, nil
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(analysis); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	insight, err := r.pushToExternalML(ctx, ticker, analysis)
+	if err != nil {
+		analysis.ExternalML = &model.ExternalMLInsight{
+			Status:      "error",
+			Message:     err.Error(),
+			RequestedAt: time.Now().UTC(),
+		}
+		return analysis, nil
+	}
+	analysis.ExternalML = insight
+	applyExternalRecommendation(&analysis.Signal, insight)
+	return analysis, nil
+}
+
+func (r *Router) pushToExternalML(ctx context.Context, ticker string, analysis *model.AdvancedAnalysis) (*model.ExternalMLInsight, error) {
+	if r.externalMLClient == nil {
+		return nil, fmt.Errorf("external ML service is not configured")
+	}
+	forecastResult, err := r.db.GetForecastResult(ticker)
+	if err != nil {
+		forecastResult, err = r.db.GenerateForecast(ticker)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load forecast for external ML request: %w", err)
+		}
+	}
+	return r.externalMLClient.PushAnalysisAndForecast(ctx, ticker, forecastResult, analysis)
+}
+
+func applyExternalRecommendation(signal *model.TradeSignal, insight *model.ExternalMLInsight) {
+	if signal == nil || insight == nil {
+		return
+	}
+	rec := insight.Recommendation
+	if rec.Action != "" {
+		signal.Action = rec.Action
+	}
+	if rec.Confidence != "" {
+		signal.Confidence = rec.Confidence
+	}
+	signal.Score += rec.ScoreDelta
+	for _, reason := range rec.Rationale {
+		trimmed := strings.TrimSpace(reason)
+		if trimmed != "" {
+			signal.Reasons = append(signal.Reasons, "External ML: "+trimmed)
+		}
+	}
+	if strings.TrimSpace(signal.GeneratedBy) == "" {
+		signal.GeneratedBy = "rule-based-v1+external-ml"
+		return
+	}
+	if !strings.Contains(signal.GeneratedBy, "external-ml") {
+		signal.GeneratedBy = signal.GeneratedBy + "+external-ml"
+	}
+}
+
+func parseBool(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 

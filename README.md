@@ -20,6 +20,7 @@ Consult a licensed financial advisor before making investment decisions.
 - Exposes REST endpoints for ingestion, historical data query, and forecast retrieval
 - Exposes advanced analytics endpoint (Monte Carlo + AR(1) + DuPont placeholder)
   - DuPont now enriched from SEC companyfacts when available
+  - Optional external ML push/enrichment flow for GPU-heavy models
 
 ## Architecture
 
@@ -30,6 +31,7 @@ HTTP API (pkg/api)
       - Yahoo Finance (no API key in current implementation)
       - Stooq CSV fallback
       - SEC fundamentals client for DuPont inputs (ticker->CIK + companyfacts)
+      - Optional external ML client (`ML_SERVICE_URL`) for ML augmentation
   -> Storage (pkg/storage)
       - GORM with configurable driver (`sqlite` local fallback, `postgres` for service-backed DB)
   -> Forecast Engine (pkg/forecast)
@@ -58,6 +60,7 @@ HTTP API (pkg/api)
 
 - Go 1.24+
 - Optional: `ALPHA_API_KEY` (used only for Alpha Vantage)
+- Optional: `ML_SERVICE_URL` (external ML orchestrator endpoint)
 
 Alpha Vantage is only one possible provider. The service supports multiple providers and
 can ingest without an Alpha key by using Yahoo/Stooq.
@@ -72,6 +75,12 @@ DuPont fundamentals source:
 - SEC `company_tickers.json` for ticker->CIK mapping
 - SEC `companyfacts` XBRL API for annual net income, revenue, assets, equity
 - Optional env: `SEC_USER_AGENT` (recommended by SEC API policy)
+
+External ML optional integration:
+- `ML_SERVICE_URL`: base URL for external ML service
+- `ML_SERVICE_PUSH_PATH`: optional push path (default `/ingest`)
+- `ML_SERVICE_API_KEY`: optional bearer token for external ML API
+- `ML_SERVICE_TIMEOUT_MS`: optional HTTP timeout in ms (default `10000`)
 
 ## Run
 
@@ -88,6 +97,7 @@ The frontend app lives in `web/` and provides:
 - SMA 20 / SMA 50 overlays
 - volume subplot
 - annual regression and projections
+- optional external ML augmentation toggle (uses `POST /ml-analysis`)
 - range selectors (`1Y`, `3Y`, `5Y`, `ALL`)
 - PNG and PDF export
 
@@ -152,6 +162,16 @@ Returns in-house advanced analytics computed from stored history:
 - AR(1)-style return model with 30-day expected price
 - DuPont decomposition from SEC annual companyfacts when available
 - Rule-based `signal` (`BUY` / `HOLD` / `SELL`) with confidence and rationale
+
+Optional query:
+- `include_ml=true` to also push `analysis + forecast` payload to configured external ML API and
+  merge returned recommendation/rationale into the signal when available.
+
+### `POST /ml-analysis?ticker=SYMBOL`
+
+Forces an external ML push using the current local `forecast` + `analysis` as input.
+Returns the same analysis payload plus `external_ml` metadata and any recommendation adjustments.
+If external ML is not configured, returns `503`.
 
 Example (trimmed):
 

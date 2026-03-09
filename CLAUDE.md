@@ -55,6 +55,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - `GET /data?ticker=SYMBOL&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 - `GET /forecast?ticker=SYMBOL`
 - `GET /analysis?ticker=SYMBOL`
+- `POST /ml-analysis?ticker=SYMBOL`
 - `GET /healthz`
 
 ## Current Implementation Notes
@@ -76,6 +77,10 @@ Design and implement a backend API that retrieves and stores five years of histo
   - AR(1)-style return forecast
   - DuPont analysis enriched from SEC companyfacts (when available)
   - Rule-based signal: `BUY` / `HOLD` / `SELL` with reasons/confidence
+- Optional external ML bridge (`pkg/ml`):
+  - pushes local `/analysis + /forecast` payload to an external service
+  - ingests external recommendation/rationale to augment the signal
+  - env-driven and optional; local analytics still work without it
 
 ### Kubernetes Hardened Baseline
 

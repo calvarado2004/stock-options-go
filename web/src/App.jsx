@@ -260,6 +260,7 @@ export const InteractiveChart = memo(function InteractiveChart({ title, subtitle
 export default function App() {
   const [ticker, setTicker] = useState('PSTG')
   const [range, setRange] = useState('5Y')
+  const [useExternalML, setUseExternalML] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ingest, setIngest] = useState(null)
@@ -291,8 +292,19 @@ export default function App() {
 
       const analysisRes = await fetch(`${api}/analysis?ticker=${encodeURIComponent(symbol)}`)
       if (analysisRes.ok) {
-        setAnalysis(await analysisRes.json())
-        setAnalysisError('')
+        let nextAnalysis = await analysisRes.json()
+        let nextAnalysisError = ''
+        if (useExternalML) {
+          const mlRes = await fetch(`${api}/ml-analysis?ticker=${encodeURIComponent(symbol)}`, { method: 'POST' })
+          if (mlRes.ok) {
+            nextAnalysis = await mlRes.json()
+          } else {
+            const mlMsg = await mlRes.text()
+            nextAnalysisError = `External ML unavailable: ${mlMsg || 'service not available.'}`
+          }
+        }
+        setAnalysis(nextAnalysis)
+        setAnalysisError(nextAnalysisError)
       } else {
         setAnalysis(null)
         setAnalysisError('Advanced analysis is not available for this ticker yet.')
@@ -404,6 +416,14 @@ export default function App() {
       <section className="panel controls">
         <input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="Ticker symbol (e.g. PSTG, AAPL, GOOG)" />
         <button onClick={load} disabled={loading} type="button">{loading ? 'Loading...' : 'Refresh & Forecast'}</button>
+        <label className="ml-toggle">
+          <input
+            type="checkbox"
+            checked={useExternalML}
+            onChange={(e) => setUseExternalML(e.target.checked)}
+          />
+          Use external ML augmentation
+        </label>
 
         <div className="range-group">
           {RANGE_OPTIONS.map((opt) => (
@@ -424,6 +444,7 @@ export default function App() {
         {ingest && <span className="badge">provider_used: {ingest.provider_used}</span>}
         {ingest && <span className="badge">fetched: {ingest.fetched_record_count}</span>}
         {ingest && <span className="badge">cache: {String(ingest.using_cached_data)}</span>}
+        {analysis?.external_ml && <span className="badge">external_ml: {analysis.external_ml.status}</span>}
       </section>
 
       {error && <section className="panel error">{error}</section>}
@@ -448,6 +469,15 @@ export default function App() {
             {analysis.signal.reasons.map((r, i) => <li key={`${i}-${r}`}>{r}</li>)}
           </ul>
           {analysis.signal.disclaimer && <p style={{ marginTop: '8px', color: '#99b2d7' }}>{analysis.signal.disclaimer}</p>}
+        </section>
+      )}
+      {analysis?.external_ml && (
+        <section className="panel" style={{ marginTop: '12px', padding: '12px' }}>
+          <strong>External ML Insight</strong>
+          <p style={{ marginTop: '8px', color: '#99b2d7' }}>
+            Provider: {analysis.external_ml.provider || '-'} | Model: {analysis.external_ml.model || '-'} | Status: {analysis.external_ml.status}
+          </p>
+          {analysis.external_ml.message && <p style={{ marginTop: '6px', color: '#99b2d7' }}>{analysis.external_ml.message}</p>}
         </section>
       )}
 
