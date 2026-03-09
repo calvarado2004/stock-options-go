@@ -173,6 +173,22 @@ Forces an external ML push using the current local `forecast` + `analysis` as in
 Returns the same analysis payload plus `external_ml` metadata and any recommendation adjustments.
 If external ML is not configured, returns `503`.
 
+Expected JSON from external ML service (minimum contract):
+
+```json
+{
+  "provider": "my-ml-service",
+  "model": "ensemble-v1",
+  "status": "ok",
+  "recommendation": {
+    "action": "BUY",
+    "confidence": "High",
+    "score_delta": 2,
+    "rationale": ["Neural trend is positive"]
+  }
+}
+```
+
 Example (trimmed):
 
 ```json

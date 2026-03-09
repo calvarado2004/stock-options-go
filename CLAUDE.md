@@ -55,6 +55,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - `GET /data?ticker=SYMBOL&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 - `GET /forecast?ticker=SYMBOL`
 - `GET /analysis?ticker=SYMBOL`
+- `GET /analysis?ticker=SYMBOL&include_ml=true` (optional external ML enrichment)
 - `POST /ml-analysis?ticker=SYMBOL`
 - `GET /healthz`
 
@@ -81,6 +82,7 @@ Design and implement a backend API that retrieves and stores five years of histo
   - pushes local `/analysis + /forecast` payload to an external service
   - ingests external recommendation/rationale to augment the signal
   - env-driven and optional; local analytics still work without it
+  - expected ML response includes `recommendation.action|confidence|score_delta|rationale`
 
 ### Kubernetes Hardened Baseline
 
