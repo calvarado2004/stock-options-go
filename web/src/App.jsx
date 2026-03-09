@@ -395,6 +395,11 @@ export default function App() {
         <h1>Stock Forecast Terminal</h1>
         <p>Institutional-style analytics: historical trend, moving averages, volume, and in-house regression forecast</p>
       </div>
+      <section className="panel error" style={{ marginTop: '12px' }}>
+        Disclosure: This tool is provided as-is for educational and informational purposes only. It is not financial advice,
+        not an offer or solicitation to buy/sell securities, and may be incomplete or inaccurate. Always do your own research
+        and consult a licensed financial advisor before making investment decisions.
+      </section>
 
       <section className="panel controls">
         <input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="Ticker symbol (e.g. PSTG, AAPL, GOOG)" />

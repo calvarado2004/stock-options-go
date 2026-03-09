@@ -1,5 +1,11 @@
 # Stock Options Project
 
+## Legal Disclaimer
+
+This project is provided **as-is** for educational and informational use. It is not
+financial advice, investment advice, or a recommendation to buy/sell securities.
+All outputs can be wrong or incomplete and must be independently validated.
+
 ## Project Scope
 
 Design and implement a backend API that retrieves and stores five years of historical stock price data for a given ticker symbol, for example `PSTG`.

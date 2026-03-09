@@ -2,6 +2,14 @@
 
 Backend API that retrieves and stores historical stock data and performs in-house forecasting.
 
+## Legal Disclaimer
+
+This project is provided **as-is** for educational and informational purposes only.
+It is **not** investment, legal, accounting, or tax advice, and it is **not** a recommendation,
+offer, or solicitation to buy or sell any security. Forecasts, analytics, and signals can be
+wrong or incomplete. You are solely responsible for any decisions made using this software.
+Consult a licensed financial advisor before making investment decisions.
+
 ## What It Does
 
 - Ingests approximately 5 years of daily historical stock data for a ticker (e.g., `PSTG`)

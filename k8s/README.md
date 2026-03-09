@@ -1,5 +1,11 @@
 # Kubernetes Manifests
 
+## Legal Disclaimer
+
+This project and these manifests are provided **as-is** for educational and informational
+purposes only. Nothing here is financial advice or a recommendation to buy/sell securities.
+Use at your own risk and validate all outputs independently.
+
 This folder contains Kubernetes resources for:
 - `stock-forecast-db` StatefulSet (PostgreSQL) with PVC
 - `stock-forecast-backend` Deployment + Service
