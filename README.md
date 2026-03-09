@@ -143,6 +143,7 @@ Returns in-house advanced analytics computed from stored history:
 - Monte Carlo price distribution (P10/P50/P90 horizons)
 - AR(1)-style return model with 30-day expected price
 - DuPont decomposition from SEC annual companyfacts when available
+- Rule-based `signal` (`BUY` / `HOLD` / `SELL`) with confidence and rationale
 
 Example (trimmed):
 
@@ -169,9 +170,44 @@ Example (trimmed):
     "asset_turnover": 0.78,
     "equity_multiplier": 2.11,
     "return_on_equity": 0.202
+  },
+  "signal": {
+    "action": "BUY",
+    "confidence": "Medium",
+    "score": 3,
+    "reasons": [
+      "Monte Carlo median 12M upside is strong (12.0%)."
+    ],
+    "disclaimer": "Educational signal only, not financial advice.",
+    "generated_by": "rule-based-v1"
   }
 }
 ```
+
+### Signal Thresholds (rule-based-v1)
+
+The recommendation engine combines Monte Carlo, AR(1), and DuPont:
+
+- Monte Carlo 12M median upside:
+  - `>= +12%` => positive (strong)
+  - `<= -5%` => negative
+- Monte Carlo 12M downside (P10):
+  - `<= -35%` => strong risk penalty
+  - `<= -25%` => risk penalty
+  - `>= -15%` => risk bonus
+- AR(1) 30D expected return:
+  - `>= +2%` => positive
+  - `<= -3%` => negative
+- DuPont (if available):
+  - ROE `>= 15%` strong positive
+  - ROE `8-15%` mild positive
+  - ROE `< 5%` negative
+  - Net margin `< 3%` additional negative
+
+Decision:
+- score `>= 3` => `BUY`
+- score `<= -2` => `SELL`
+- otherwise => `HOLD`
 
 ## Database Schema
 

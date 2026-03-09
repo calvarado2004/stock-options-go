@@ -431,6 +431,22 @@ export default function App() {
       </section>
 
       <section className="metrics">
+        <article className="panel metric"><span>Signal</span><strong>{analysis?.signal?.action || '-'}</strong></article>
+        <article className="panel metric"><span>Signal Confidence</span><strong>{analysis?.signal?.confidence || '-'}</strong></article>
+        <article className="panel metric"><span>Signal Score</span><strong>{analysis?.signal ? String(analysis.signal.score) : '-'}</strong></article>
+        <article className="panel metric"><span>Model</span><strong>{analysis?.signal?.generated_by || '-'}</strong></article>
+      </section>
+      {analysis?.signal?.reasons?.length > 0 && (
+        <section className="panel" style={{ marginTop: '12px', padding: '12px' }}>
+          <strong>Signal Rationale</strong>
+          <ul style={{ margin: '8px 0 0 18px', color: '#bcd4f6' }}>
+            {analysis.signal.reasons.map((r, i) => <li key={`${i}-${r}`}>{r}</li>)}
+          </ul>
+          {analysis.signal.disclaimer && <p style={{ marginTop: '8px', color: '#99b2d7' }}>{analysis.signal.disclaimer}</p>}
+        </section>
+      )}
+
+      <section className="metrics">
         <article className="panel metric"><span>AR(1) Expected 30D</span><strong>{analysis ? `$${money(analysis.ar1.expected_price_30d)}` : '-'}</strong></article>
         <article className="panel metric"><span>AR(1) 1D Return</span><strong>{analysis ? `${(analysis.ar1.forecast_return_1d * 100).toFixed(2)}%` : '-'}</strong></article>
         <article className="panel metric"><span>MC Annual Drift</span><strong>{analysis ? `${(analysis.monte_carlo.drift_annual * 100).toFixed(2)}%` : '-'}</strong></article>

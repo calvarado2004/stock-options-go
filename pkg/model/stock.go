@@ -80,4 +80,14 @@ type AdvancedAnalysis struct {
 	MonteCarlo   MonteCarloAnalysis `json:"monte_carlo"`
 	AR1          AR1Analysis        `json:"ar1"`
 	DuPont       DuPontAnalysis     `json:"dupont"`
+	Signal       TradeSignal        `json:"signal"`
+}
+
+type TradeSignal struct {
+	Action      string   `json:"action"` // BUY | HOLD | SELL
+	Confidence  string   `json:"confidence"`
+	Score       int      `json:"score"`
+	Reasons     []string `json:"reasons"`
+	Disclaimer  string   `json:"disclaimer"`
+	GeneratedBy string   `json:"generated_by"`
 }

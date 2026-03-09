@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"stock-options/pkg/data"
+	"stock-options/pkg/forecast"
 	"stock-options/pkg/model"
 	"stock-options/pkg/storage"
 
@@ -253,6 +254,7 @@ func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
 	if r.secFundamentalsCli != nil {
 		if dupont, dupontErr := r.secFundamentalsCli.GetDuPontAnalysis(ticker); dupontErr == nil && dupont != nil {
 			analysis.DuPont = *dupont
+			analysis.Signal = forecast.EvaluateTradeSignal(analysis.CurrentPrice, analysis.MonteCarlo, analysis.AR1, analysis.DuPont)
 		}
 	}
 

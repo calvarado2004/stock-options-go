@@ -58,7 +58,12 @@ func AnalyzeAdvanced(ticker string, historical []model.StockData, now time.Time)
 			Available: false,
 			Message:   "DuPont requires financial statement inputs (net margin, asset turnover, equity multiplier).",
 		},
+		Signal: buildTradeSignal(currentPrice, mc, ar1, model.DuPontAnalysis{}),
 	}, nil
+}
+
+func EvaluateTradeSignal(currentPrice float64, mc model.MonteCarloAnalysis, ar1 model.AR1Analysis, dupont model.DuPontAnalysis) model.TradeSignal {
+	return buildTradeSignal(currentPrice, mc, ar1, dupont)
 }
 
 func monteCarloAnalysis(startPrice float64, driftAnnual float64, volAnnual float64, now time.Time) model.MonteCarloAnalysis {
@@ -184,4 +189,116 @@ func percentileSorted(sortedValues []float64, p float64) float64 {
 	}
 	w := pos - float64(lo)
 	return sortedValues[lo]*(1-w) + sortedValues[hi]*w
+}
+
+func buildTradeSignal(currentPrice float64, mc model.MonteCarloAnalysis, ar1 model.AR1Analysis, dupont model.DuPontAnalysis) model.TradeSignal {
+	score := 0
+	reasons := make([]string, 0, 6)
+
+	var p50_12m, p10_12m float64
+	for _, pt := range mc.Points {
+		if pt.HorizonDays == 252 {
+			p50_12m = pt.P50
+			p10_12m = pt.P10
+			break
+		}
+	}
+	if p50_12m == 0 && len(mc.Points) > 0 {
+		last := mc.Points[len(mc.Points)-1]
+		p50_12m = last.P50
+		p10_12m = last.P10
+	}
+
+	upside12m := safePctChange(currentPrice, p50_12m)
+	downside12m := safePctChange(currentPrice, p10_12m)
+	ar1_30d := safePctChange(currentPrice, ar1.ExpectedPrice30D)
+
+	// Growth and risk thresholds (rule-based heuristic).
+	if upside12m >= 0.12 {
+		score += 2
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo median 12M upside is strong (%.1f%%).", upside12m*100))
+	} else if upside12m >= 0.04 {
+		score++
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo median 12M upside is positive (%.1f%%).", upside12m*100))
+	} else if upside12m <= -0.05 {
+		score -= 2
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo median 12M implies downside (%.1f%%).", upside12m*100))
+	}
+
+	if downside12m <= -0.35 {
+		score -= 2
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo P10 indicates deep downside risk (%.1f%%).", downside12m*100))
+	} else if downside12m <= -0.25 {
+		score--
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo P10 downside risk is elevated (%.1f%%).", downside12m*100))
+	} else if downside12m >= -0.15 {
+		score++
+		reasons = append(reasons, fmt.Sprintf("Monte Carlo downside band is contained (%.1f%% at P10).", downside12m*100))
+	}
+
+	if ar1_30d >= 0.02 {
+		score++
+		reasons = append(reasons, fmt.Sprintf("AR(1) 30-day expected return is positive (%.1f%%).", ar1_30d*100))
+	} else if ar1_30d <= -0.03 {
+		score--
+		reasons = append(reasons, fmt.Sprintf("AR(1) 30-day expected return is negative (%.1f%%).", ar1_30d*100))
+	}
+
+	if dupont.Available {
+		if dupont.ReturnOnEquity >= 0.15 {
+			score += 2
+			reasons = append(reasons, fmt.Sprintf("DuPont ROE is strong (%.1f%%).", dupont.ReturnOnEquity*100))
+		} else if dupont.ReturnOnEquity >= 0.08 {
+			score++
+			reasons = append(reasons, fmt.Sprintf("DuPont ROE is acceptable (%.1f%%).", dupont.ReturnOnEquity*100))
+		} else if dupont.ReturnOnEquity < 0.05 {
+			score -= 2
+			reasons = append(reasons, fmt.Sprintf("DuPont ROE is weak (%.1f%%).", dupont.ReturnOnEquity*100))
+		}
+		if dupont.NetProfitMargin < 0.03 {
+			score--
+			reasons = append(reasons, fmt.Sprintf("Net margin is thin (%.1f%%).", dupont.NetProfitMargin*100))
+		}
+	}
+
+	action := "HOLD"
+	if score >= 3 {
+		action = "BUY"
+	} else if score <= -2 {
+		action = "SELL"
+	}
+
+	confidence := "Low"
+	if absInt(score) >= 4 {
+		confidence = "High"
+	} else if absInt(score) >= 2 {
+		confidence = "Medium"
+	}
+
+	if len(reasons) == 0 {
+		reasons = append(reasons, "Insufficient directional evidence; maintaining neutral stance.")
+	}
+
+	return model.TradeSignal{
+		Action:      action,
+		Confidence:  confidence,
+		Score:       score,
+		Reasons:     reasons,
+		Disclaimer:  "Educational signal only, not financial advice.",
+		GeneratedBy: "rule-based-v1",
+	}
+}
+
+func safePctChange(base float64, value float64) float64 {
+	if base == 0 {
+		return 0
+	}
+	return (value / base) - 1.0
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

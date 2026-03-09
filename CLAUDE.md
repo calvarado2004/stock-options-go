@@ -69,6 +69,7 @@ Design and implement a backend API that retrieves and stores five years of histo
   - Monte Carlo simulation bands
   - AR(1)-style return forecast
   - DuPont analysis enriched from SEC companyfacts (when available)
+  - Rule-based signal: `BUY` / `HOLD` / `SELL` with reasons/confidence
 
 ### Kubernetes Hardened Baseline
 
