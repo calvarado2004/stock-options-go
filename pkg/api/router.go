@@ -73,6 +73,8 @@ func (r *Router) ingestHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Ticker parameter is required", http.StatusBadRequest)
 		return
 	}
+	forceRefresh := strings.EqualFold(strings.TrimSpace(req.URL.Query().Get("refresh")), "true") ||
+		strings.TrimSpace(req.URL.Query().Get("refresh")) == "1"
 
 	endDate := time.Now().UTC()
 	startDate := endDate.AddDate(-5, 0, 0)
@@ -86,7 +88,9 @@ func (r *Router) ingestHandler(w http.ResponseWriter, req *http.Request) {
 	usingCachedData := false
 	fetchStart := startDate
 	if hasData {
-		if latestTradingDate.After(endDate.AddDate(0, 0, -3)) {
+		// Cache-first strategy: if we already have data, prefer local DB unless
+		// caller explicitly requests refresh=true.
+		if !forceRefresh {
 			usingCachedData = true
 		} else {
 			fetchStart = latestTradingDate.AddDate(0, 0, 1)

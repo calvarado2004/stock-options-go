@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"stock-options/pkg/model"
@@ -26,6 +27,11 @@ type AlphaVantageProvider struct {
 	AlphaAvangeApiKey string
 	BaseURL           string
 	Client            *http.Client
+	MinRequestDelay   time.Duration
+	MaxHTTPRetries    int
+	InitialBackoff    time.Duration
+	mu                sync.Mutex
+	lastRequestByHost map[string]time.Time
 }
 
 func NewAlphaVantageProvider(alphaAvangeApiKey string) *AlphaVantageProvider {
@@ -33,6 +39,10 @@ func NewAlphaVantageProvider(alphaAvangeApiKey string) *AlphaVantageProvider {
 		AlphaAvangeApiKey: alphaAvangeApiKey,
 		BaseURL:           "https://www.alphavantage.co/query",
 		Client:            &http.Client{Timeout: 20 * time.Second},
+		MinRequestDelay:   350 * time.Millisecond,
+		MaxHTTPRetries:    4,
+		InitialBackoff:    250 * time.Millisecond,
+		lastRequestByHost: map[string]time.Time{},
 	}
 }
 
@@ -79,18 +89,9 @@ func (p *AlphaVantageProvider) getHistoricalDataFromYahoo(ticker string, startDa
 		url.PathEscape(strings.ToUpper(strings.TrimSpace(ticker))),
 		query.Encode(),
 	)
-	resp, err := p.Client.Get(endpoint)
+	body, err := p.getURLWithRetry("yahoo", endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("yahoo request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("yahoo returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed reading yahoo body: %w", err)
+		return nil, err
 	}
 
 	type yahooResponse struct {
@@ -195,18 +196,9 @@ func (p *AlphaVantageProvider) getHistoricalDataFromAlphaVantage(ticker string, 
 	query.Set("outputsize", "full")
 
 	avURL := fmt.Sprintf("%s?%s", p.BaseURL, query.Encode())
-	resp, err := p.Client.Get(avURL)
+	body, err := p.getURLWithRetry("alphavantage", avURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch data from Alpha Vantage: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("alpha vantage returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, err
 	}
 
 	var apiResponse map[string]interface{}
@@ -317,19 +309,9 @@ func (p *AlphaVantageProvider) getHistoricalDataFromStooq(ticker string, startDa
 		query.Set("i", "d")
 		downloadURL := fmt.Sprintf("https://stooq.com/q/d/l/?%s", query.Encode())
 
-		resp, err := p.Client.Get(downloadURL)
+		body, err := p.getURLWithRetry("stooq", downloadURL)
 		if err != nil {
 			lastErr = err
-			continue
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			lastErr = fmt.Errorf("stooq returned status %d", resp.StatusCode)
 			continue
 		}
 
@@ -461,4 +443,86 @@ func toInt64At(values []interface{}, idx int) int64 {
 		return 0
 	}
 	return int64(value)
+}
+
+func (p *AlphaVantageProvider) getURLWithRetry(provider string, endpoint string) ([]byte, error) {
+	p.ensureDefaults()
+
+	var lastErr error
+	for attempt := 1; attempt <= p.MaxHTTPRetries; attempt++ {
+		p.throttle(provider)
+
+		resp, err := p.Client.Get(endpoint)
+		if err != nil {
+			lastErr = fmt.Errorf("%s request failed: %w", provider, err)
+		} else {
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				lastErr = fmt.Errorf("failed reading %s body: %w", provider, readErr)
+			} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return body, nil
+			} else {
+				lastErr = fmt.Errorf("%s returned status %d", provider, resp.StatusCode)
+				if !isRetryableStatus(resp.StatusCode) {
+					return nil, lastErr
+				}
+			}
+		}
+
+		if attempt < p.MaxHTTPRetries {
+			time.Sleep(backoffDuration(p.InitialBackoff, attempt))
+		}
+	}
+
+	return nil, lastErr
+}
+
+func isRetryableStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
+
+func backoffDuration(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = 250 * time.Millisecond
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	factor := 1 << (attempt - 1)
+	return time.Duration(factor) * base
+}
+
+func (p *AlphaVantageProvider) ensureDefaults() {
+	if p.Client == nil {
+		p.Client = &http.Client{Timeout: 20 * time.Second}
+	}
+	if p.MaxHTTPRetries <= 0 {
+		p.MaxHTTPRetries = 4
+	}
+	if p.InitialBackoff <= 0 {
+		p.InitialBackoff = 250 * time.Millisecond
+	}
+	if p.MinRequestDelay < 0 {
+		p.MinRequestDelay = 0
+	}
+	if p.lastRequestByHost == nil {
+		p.lastRequestByHost = map[string]time.Time{}
+	}
+}
+
+func (p *AlphaVantageProvider) throttle(provider string) {
+	if p.MinRequestDelay <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if last, ok := p.lastRequestByHost[provider]; ok {
+		wait := p.MinRequestDelay - time.Since(last)
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+	}
+	p.lastRequestByHost[provider] = time.Now()
 }

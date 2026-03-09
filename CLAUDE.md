@@ -57,6 +57,9 @@ Design and implement a backend API that retrieves and stores five years of histo
   - Yahoo Finance (no API key in current implementation)
   - Stooq fallback
 - Alpha Vantage is one possible provider among several supported sources
+- Provider calls are serial (no parallel provider fan-out)
+- Ingest is cache-first by default; use `refresh=true` to force external refresh
+- Provider HTTP calls use retry/backoff for transient errors (`429`, `5xx`) with pacing delay
 - Storage (`pkg/storage`): configurable DB driver via GORM
   - local fallback: SQLite
   - container/K8s baseline: PostgreSQL service

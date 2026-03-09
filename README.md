@@ -50,6 +50,12 @@ HTTP API (pkg/api)
 Alpha Vantage is only one possible provider. The service supports multiple providers and
 can ingest without an Alpha key by using Yahoo/Stooq.
 
+Provider behavior:
+- Requests are attempted serially (no parallel fan-out): Alpha Vantage (if key) -> Yahoo -> Stooq
+- Cache-first ingestion by default (avoids external calls when local ticker data exists)
+- HTTP retry/backoff for transient failures (`429`, `5xx`)
+- Small per-provider pacing delay between requests
+
 ## Run
 
 ```bash
@@ -80,10 +86,13 @@ Open `http://localhost:5173`.
 
 ## API
 
-### `POST /ingest?ticker=SYMBOL`
+### `POST /ingest?ticker=SYMBOL[&refresh=true]`
 
 Ingests missing data (or uses cache) and generates/stores forecast.
 If live fetch fails but local history exists, ingestion still succeeds from cache.
+Default behavior is cache-first: if the ticker already exists in DB, it will use local
+data and avoid external provider calls.
+Use `refresh=true` to force an external fetch attempt for newer rows.
 
 Example response:
 
