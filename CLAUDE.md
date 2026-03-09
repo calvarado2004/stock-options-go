@@ -68,7 +68,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - Advanced analytics (`pkg/forecast`):
   - Monte Carlo simulation bands
   - AR(1)-style return forecast
-  - DuPont placeholder requiring financial statements
+  - DuPont analysis enriched from SEC companyfacts (when available)
 
 ### Kubernetes Hardened Baseline
 

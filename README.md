@@ -11,6 +11,7 @@ Backend API that retrieves and stores historical stock data and performs in-hous
 - Performs local linear regression forecasting (no external forecasting service)
 - Exposes REST endpoints for ingestion, historical data query, and forecast retrieval
 - Exposes advanced analytics endpoint (Monte Carlo + AR(1) + DuPont placeholder)
+  - DuPont now enriched from SEC companyfacts when available
 
 ## Architecture
 
@@ -20,10 +21,12 @@ HTTP API (pkg/api)
       - Alpha Vantage (optional, key-based) via `ALPHA_API_KEY`
       - Yahoo Finance (no API key in current implementation)
       - Stooq CSV fallback
+      - SEC fundamentals client for DuPont inputs (ticker->CIK + companyfacts)
   -> Storage (pkg/storage)
       - GORM with configurable driver (`sqlite` local fallback, `postgres` for service-backed DB)
   -> Forecast Engine (pkg/forecast)
       - LinearRegressionForecaster (local calculations)
+      - Advanced analysis (Monte Carlo, AR(1), DuPont)
 ```
 
 ## Project Structure
@@ -56,6 +59,11 @@ Provider behavior:
 - Cache-first ingestion by default (avoids external calls when local ticker data exists)
 - HTTP retry/backoff for transient failures (`429`, `5xx`)
 - Small per-provider pacing delay between requests
+
+DuPont fundamentals source:
+- SEC `company_tickers.json` for ticker->CIK mapping
+- SEC `companyfacts` XBRL API for annual net income, revenue, assets, equity
+- Optional env: `SEC_USER_AGENT` (recommended by SEC API policy)
 
 ## Run
 
@@ -134,7 +142,36 @@ Returns persisted forecast for the ticker.
 Returns in-house advanced analytics computed from stored history:
 - Monte Carlo price distribution (P10/P50/P90 horizons)
 - AR(1)-style return model with 30-day expected price
-- DuPont section placeholder (requires financial statements input)
+- DuPont decomposition from SEC annual companyfacts when available
+
+Example (trimmed):
+
+```json
+{
+  "ticker": "PSTG",
+  "current_price": 63.14,
+  "monte_carlo": {
+    "paths": 300,
+    "drift_annual": 0.18,
+    "volatility_annual": 0.34,
+    "points": [
+      { "horizon_days": 21, "p10": 57.4, "p50": 63.8, "p90": 70.9 }
+    ]
+  },
+  "ar1": {
+    "forecast_return_1d": 0.0012,
+    "expected_price_30d": 65.5
+  },
+  "dupont": {
+    "available": true,
+    "source": "sec-companyfacts",
+    "net_profit_margin": 0.123,
+    "asset_turnover": 0.78,
+    "equity_multiplier": 2.11,
+    "return_on_equity": 0.202
+  }
+}
+```
 
 ## Database Schema
 

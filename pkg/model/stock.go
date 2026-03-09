@@ -59,8 +59,18 @@ type AR1Analysis struct {
 }
 
 type DuPontAnalysis struct {
-	Available bool   `json:"available"`
-	Message   string `json:"message"`
+	Available        bool      `json:"available"`
+	Message          string    `json:"message"`
+	Source           string    `json:"source,omitempty"`
+	PeriodEnd        time.Time `json:"period_end,omitempty"`
+	NetProfitMargin  float64   `json:"net_profit_margin,omitempty"`
+	AssetTurnover    float64   `json:"asset_turnover,omitempty"`
+	EquityMultiplier float64   `json:"equity_multiplier,omitempty"`
+	ReturnOnEquity   float64   `json:"return_on_equity,omitempty"`
+	NetIncome        float64   `json:"net_income,omitempty"`
+	Revenue          float64   `json:"revenue,omitempty"`
+	AverageAssets    float64   `json:"average_assets,omitempty"`
+	AverageEquity    float64   `json:"average_equity,omitempty"`
 }
 
 type AdvancedAnalysis struct {

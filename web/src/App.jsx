@@ -436,6 +436,13 @@ export default function App() {
         <article className="panel metric"><span>MC Annual Drift</span><strong>{analysis ? `${(analysis.monte_carlo.drift_annual * 100).toFixed(2)}%` : '-'}</strong></article>
         <article className="panel metric"><span>MC Annual Volatility</span><strong>{analysis ? `${(analysis.monte_carlo.volatility_annual * 100).toFixed(2)}%` : '-'}</strong></article>
       </section>
+      <section className="metrics">
+        <article className="panel metric"><span>DuPont ROE</span><strong>{analysis?.dupont?.available ? `${(analysis.dupont.return_on_equity * 100).toFixed(2)}%` : '-'}</strong></article>
+        <article className="panel metric"><span>Net Profit Margin</span><strong>{analysis?.dupont?.available ? `${(analysis.dupont.net_profit_margin * 100).toFixed(2)}%` : '-'}</strong></article>
+        <article className="panel metric"><span>Asset Turnover</span><strong>{analysis?.dupont?.available ? `${analysis.dupont.asset_turnover.toFixed(2)}x` : '-'}</strong></article>
+        <article className="panel metric"><span>Equity Multiplier</span><strong>{analysis?.dupont?.available ? `${analysis.dupont.equity_multiplier.toFixed(2)}x` : '-'}</strong></article>
+      </section>
+      {analysis?.dupont?.message && <section className="panel error">{analysis.dupont.message}</section>}
       {analysisError && <section className="panel error">{analysisError}</section>}
 
       <div ref={exportRef}>

@@ -17,8 +17,9 @@ import (
 )
 
 type Router struct {
-	db           *storage.Database
-	dataProvider data.StockDataProvider
+	db                 *storage.Database
+	dataProvider       data.StockDataProvider
+	secFundamentalsCli *data.SECFundamentalsClient
 }
 
 type ingestResponse struct {
@@ -46,7 +47,11 @@ func NewRouter() *Router {
 	alphaAvangeApiKey := os.Getenv("ALPHA_API_KEY")
 	dataProvider := data.NewAlphaVantageProvider(alphaAvangeApiKey)
 
-	return NewRouterWithDependencies(db, dataProvider)
+	return &Router{
+		db:                 db,
+		dataProvider:       dataProvider,
+		secFundamentalsCli: data.NewSECFundamentalsClient(os.Getenv("SEC_USER_AGENT")),
+	}
 }
 
 func NewRouterWithDependencies(db *storage.Database, provider data.StockDataProvider) *Router {
@@ -244,6 +249,11 @@ func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		http.Error(w, "No advanced analysis available for this ticker", http.StatusNotFound)
 		return
+	}
+	if r.secFundamentalsCli != nil {
+		if dupont, dupontErr := r.secFundamentalsCli.GetDuPontAnalysis(ticker); dupontErr == nil && dupont != nil {
+			analysis.DuPont = *dupont
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
