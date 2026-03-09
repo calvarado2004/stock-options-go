@@ -48,6 +48,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - `POST /ingest?ticker=SYMBOL`
 - `GET /data?ticker=SYMBOL&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 - `GET /forecast?ticker=SYMBOL`
+- `GET /analysis?ticker=SYMBOL`
 - `GET /healthz`
 
 ## Current Implementation Notes
@@ -64,6 +65,10 @@ Design and implement a backend API that retrieves and stores five years of histo
   - local fallback: SQLite
   - container/K8s baseline: PostgreSQL service
 - Forecast engine (`pkg/forecast`): local linear regression forecaster
+- Advanced analytics (`pkg/forecast`):
+  - Monte Carlo simulation bands
+  - AR(1)-style return forecast
+  - DuPont placeholder requiring financial statements
 
 ### Kubernetes Hardened Baseline
 

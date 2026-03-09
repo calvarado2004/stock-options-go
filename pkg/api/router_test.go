@@ -19,28 +19,24 @@ func (m *mockProvider) GetHistoricalData(ticker string, startDate time.Time, end
 		return nil, "", fmt.Errorf("provider failure")
 	}
 
-	adj := 101.5
-	return []model.StockData{
-		{
+	baseDate := time.Date(2023, 7, 3, 0, 0, 0, 0, time.UTC)
+	rows := make([]model.StockData, 0, 520)
+	for i := 0; i < 520; i++ {
+		d := baseDate.AddDate(0, 0, i)
+		price := 100.0 + float64(i)*0.2
+		adj := price * 1.001
+		rows = append(rows, model.StockData{
 			Ticker:        ticker,
-			TradingDate:   time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
-			OpenPrice:     100,
-			HighPrice:     102,
-			LowPrice:      99,
-			ClosePrice:    101,
+			TradingDate:   d,
+			OpenPrice:     price - 0.5,
+			HighPrice:     price + 0.8,
+			LowPrice:      price - 0.9,
+			ClosePrice:    price,
 			AdjustedClose: &adj,
-			Volume:        1000,
-		},
-		{
-			Ticker:      ticker,
-			TradingDate: time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
-			OpenPrice:   110,
-			HighPrice:   112,
-			LowPrice:    108,
-			ClosePrice:  111,
-			Volume:      1200,
-		},
-	}, "yahoo", nil
+			Volume:        1000 + int64(i*5),
+		})
+	}
+	return rows, "yahoo", nil
 }
 
 func newTestRouter(t *testing.T) *Router {

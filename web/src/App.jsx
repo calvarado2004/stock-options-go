@@ -29,6 +29,11 @@ function formatYearMonth(ms) {
   return `${y}/${m}`
 }
 
+function formatHorizonMonths(days) {
+  const months = Math.max(1, Math.round(days / 21))
+  return `${months}M`
+}
+
 function nearestIndex(points, targetX) {
   if (!points.length) return -1
   let lo = 0
@@ -260,6 +265,7 @@ export default function App() {
   const [ingest, setIngest] = useState(null)
   const [rows, setRows] = useState([])
   const [forecast, setForecast] = useState(null)
+  const [analysis, setAnalysis] = useState(null)
   const exportRef = useRef(null)
 
   const load = async () => {
@@ -281,6 +287,10 @@ export default function App() {
       const forecastRes = await fetch(`${api}/forecast?ticker=${encodeURIComponent(symbol)}`)
       if (!forecastRes.ok) throw new Error(await forecastRes.text())
       setForecast(await forecastRes.json())
+
+      const analysisRes = await fetch(`${api}/analysis?ticker=${encodeURIComponent(symbol)}`)
+      if (!analysisRes.ok) throw new Error(await analysisRes.text())
+      setAnalysis(await analysisRes.json())
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -337,6 +347,10 @@ export default function App() {
       { x: forecast.year_after_next, y: forecast.year_after_next_forecast }
     ]
   }, [forecast])
+
+  const mcP10 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p10 })), [analysis])
+  const mcP50 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p50 })), [analysis])
+  const mcP90 = useMemo(() => (analysis?.monte_carlo?.points || []).map((p) => ({ x: p.horizon_days, y: p.p90 })), [analysis])
 
   const exportPNG = async () => {
     if (!exportRef.current) return
@@ -400,6 +414,13 @@ export default function App() {
         <article className="panel metric"><span>Regression Equation</span><strong>{forecast ? `y = ${forecast.regression_slope.toFixed(2)}x + ${forecast.regression_intercept.toFixed(2)}` : '-'}</strong></article>
       </section>
 
+      <section className="metrics">
+        <article className="panel metric"><span>AR(1) Expected 30D</span><strong>{analysis ? `$${money(analysis.ar1.expected_price_30d)}` : '-'}</strong></article>
+        <article className="panel metric"><span>AR(1) 1D Return</span><strong>{analysis ? `${(analysis.ar1.forecast_return_1d * 100).toFixed(2)}%` : '-'}</strong></article>
+        <article className="panel metric"><span>MC Annual Drift</span><strong>{analysis ? `${(analysis.monte_carlo.drift_annual * 100).toFixed(2)}%` : '-'}</strong></article>
+        <article className="panel metric"><span>MC Annual Volatility</span><strong>{analysis ? `${(analysis.monte_carlo.volatility_annual * 100).toFixed(2)}%` : '-'}</strong></article>
+      </section>
+
       <div ref={exportRef}>
         <InteractiveChart
           title="Price Over Time"
@@ -428,6 +449,17 @@ export default function App() {
             { id: 'actual', name: 'Actual Annual Avg', points: annualAvg, color: '#2f8fff' },
             { id: 'fit', name: 'Regression Fit', points: regression, color: '#95b7ff', dashed: true, dot: 2 },
             { id: 'proj', name: 'Projected Avg', points: projected, color: '#2bd7ff', dot: 4 }
+          ]}
+        />
+
+        <InteractiveChart
+          title="Monte Carlo Price Distribution"
+          subtitle="P10 / P50 / P90 simulated price bands"
+          xTickFormatter={formatHorizonMonths}
+          series={[
+            { id: 'mc-p10', name: 'P10', points: mcP10, color: '#3d6fb0', dashed: true, dot: 2 },
+            { id: 'mc-p50', name: 'P50', points: mcP50, color: '#4bb3ff', dot: 3 },
+            { id: 'mc-p90', name: 'P90', points: mcP90, color: '#77d6ff', dashed: true, dot: 2 }
           ]}
         />
       </div>

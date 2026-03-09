@@ -6,6 +6,12 @@ describe('App', () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: /stock forecast terminal/i })).toBeInTheDocument()
   })
+
+  it('renders advanced analytics labels', () => {
+    render(<App />)
+    expect(screen.getByText(/ar\(1\) expected 30d/i)).toBeInTheDocument()
+    expect(screen.getByText(/mc annual volatility/i)).toBeInTheDocument()
+  })
 })
 
 describe('InteractiveChart', () => {

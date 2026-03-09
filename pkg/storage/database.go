@@ -165,6 +165,17 @@ func (d *Database) GenerateForecast(ticker string) (*model.ForecastResult, error
 	return forecastResult, nil
 }
 
+func (d *Database) GenerateAdvancedAnalysis(ticker string) (*model.AdvancedAnalysis, error) {
+	var series []model.StockData
+	if err := d.DB.Where("ticker = ?", ticker).Order("trading_date asc").Find(&series).Error; err != nil {
+		return nil, err
+	}
+	if len(series) == 0 {
+		return nil, fmt.Errorf("no historical data for ticker %s", ticker)
+	}
+	return forecast.AnalyzeAdvanced(ticker, series, time.Now().UTC())
+}
+
 func (d *Database) Ping() error {
 	sqlDB, err := d.DB.DB()
 	if err != nil {

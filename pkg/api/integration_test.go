@@ -81,6 +81,28 @@ func TestAPIIntegration(t *testing.T) {
 			t.Errorf("expected ticker TEST in response, got %#v", payload["ticker"])
 		}
 	})
+
+	t.Run("Test analysis endpoint with ticker parameter", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "/analysis?ticker=TEST", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+
+		if status := recorder.Code; status != http.StatusOK {
+			t.Errorf("Expected status %d, got %d", http.StatusOK, status)
+		}
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid json response: %v", err)
+		}
+		if payload["ticker"] != "TEST" {
+			t.Errorf("expected ticker TEST in response, got %#v", payload["ticker"])
+		}
+	})
 }
 
 // Test database operations directly

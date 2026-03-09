@@ -62,6 +62,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	router.HandleFunc("/ingest", r.ingestHandler).Methods("POST")
 	router.HandleFunc("/data", r.dataHandler).Methods("GET")
 	router.HandleFunc("/forecast", r.forecastHandler).Methods("GET")
+	router.HandleFunc("/analysis", r.analysisHandler).Methods("GET")
 	router.HandleFunc("/healthz", r.healthHandler).Methods("GET")
 
 	router.ServeHTTP(w, req)
@@ -228,6 +229,26 @@ func (r *Router) forecastHandler(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(forecast); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
+	ticker := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("ticker")))
+	if ticker == "" {
+		http.Error(w, "Ticker parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	analysis, err := r.db.GenerateAdvancedAnalysis(ticker)
+	if err != nil {
+		http.Error(w, "No advanced analysis available for this ticker", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(analysis); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
 	}
 }

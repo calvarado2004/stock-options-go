@@ -10,6 +10,7 @@ Backend API that retrieves and stores historical stock data and performs in-hous
 - Falls back to cached data if external providers are temporarily unavailable/rate-limited
 - Performs local linear regression forecasting (no external forecasting service)
 - Exposes REST endpoints for ingestion, historical data query, and forecast retrieval
+- Exposes advanced analytics endpoint (Monte Carlo + AR(1) + DuPont placeholder)
 
 ## Architecture
 
@@ -127,6 +128,13 @@ Returns stored historical rows from configured DB.
 ### `GET /forecast?ticker=SYMBOL`
 
 Returns persisted forecast for the ticker.
+
+### `GET /analysis?ticker=SYMBOL`
+
+Returns in-house advanced analytics computed from stored history:
+- Monte Carlo price distribution (P10/P50/P90 horizons)
+- AR(1)-style return model with 30-day expected price
+- DuPont section placeholder (requires financial statements input)
 
 ## Database Schema
 
