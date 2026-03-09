@@ -98,16 +98,25 @@ func (r *Router) ingestHandler(w http.ResponseWriter, req *http.Request) {
 	if !usingCachedData {
 		historicalData, source, fetchErr := r.dataProvider.GetHistoricalData(ticker, fetchStart, endDate)
 		if fetchErr != nil {
-			http.Error(w, fmt.Sprintf("Failed to fetch data for %s: %v", ticker, fetchErr), http.StatusBadGateway)
-			return
-		}
-		providerUsed = source
-		fetchedCount = len(historicalData)
-
-		if fetchedCount > 0 {
-			if err := r.db.SaveStockData(historicalData); err != nil {
-				http.Error(w, fmt.Sprintf("Failed to store data for %s: %v", ticker, err), http.StatusInternalServerError)
+			if hasData {
+				// Providers can be temporarily unavailable or rate-limited.
+				// If we already have local history, continue with cached data.
+				usingCachedData = true
+				providerUsed = "cache"
+				log.Printf("{\"ticker\":\"%s\",\"provider_used\":\"cache\",\"fallback_reason\":%q}", ticker, fetchErr.Error())
+			} else {
+				http.Error(w, fmt.Sprintf("Failed to fetch data for %s: %v", ticker, fetchErr), http.StatusBadGateway)
 				return
+			}
+		} else {
+			providerUsed = source
+			fetchedCount = len(historicalData)
+
+			if fetchedCount > 0 {
+				if err := r.db.SaveStockData(historicalData); err != nil {
+					http.Error(w, fmt.Sprintf("Failed to store data for %s: %v", ticker, err), http.StatusInternalServerError)
+					return
+				}
 			}
 		}
 	}

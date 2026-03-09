@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -80,5 +81,68 @@ func TestHealthEndpoint(t *testing.T) {
 
 	if status := recorder.Code; status != http.StatusOK {
 		t.Errorf("Expected status %d, got %d", http.StatusOK, status)
+	}
+}
+
+type failProvider struct{}
+
+func (m *failProvider) GetHistoricalData(ticker string, startDate time.Time, endDate time.Time) ([]model.StockData, string, error) {
+	return nil, "", fmt.Errorf("yahoo returned status 429")
+}
+
+func TestIngestFallsBackToCacheWhenProviderFails(t *testing.T) {
+	db, err := storage.NewDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adj := 101.0
+	seed := []model.StockData{
+		{
+			Ticker:        "PSTG",
+			TradingDate:   time.Now().UTC().AddDate(-1, 0, 0).Truncate(24 * time.Hour),
+			OpenPrice:     100,
+			HighPrice:     103,
+			LowPrice:      99,
+			ClosePrice:    102,
+			AdjustedClose: &adj,
+			Volume:        2000,
+		},
+		{
+			Ticker:      "PSTG",
+			TradingDate: time.Now().UTC().AddDate(0, 0, -7).Truncate(24 * time.Hour),
+			OpenPrice:   98,
+			HighPrice:   101,
+			LowPrice:    96,
+			ClosePrice:  99,
+			Volume:      1800,
+		},
+	}
+	if err := db.SaveStockData(seed); err != nil {
+		t.Fatalf("failed to seed data: %v", err)
+	}
+
+	router := NewRouterWithDependencies(db, &failProvider{})
+	req, err := http.NewRequest("POST", "/ingest?ticker=PSTG", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if status := recorder.Code; status != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d; body=%s", http.StatusOK, status, recorder.Body.String())
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if payload["provider_used"] != "cache" {
+		t.Fatalf("expected provider_used cache, got %#v", payload["provider_used"])
+	}
+	if payload["using_cached_data"] != true {
+		t.Fatalf("expected using_cached_data true, got %#v", payload["using_cached_data"])
 	}
 }

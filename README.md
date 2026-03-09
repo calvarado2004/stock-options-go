@@ -7,6 +7,7 @@ Backend API that retrieves and stores historical stock data and performs in-hous
 - Ingests approximately 5 years of daily historical stock data for a ticker (e.g., `PSTG`)
 - Stores data in a relational DB with upsert semantics
 - Reuses cached data when local data is sufficiently up to date
+- Falls back to cached data if external providers are temporarily unavailable/rate-limited
 - Performs local linear regression forecasting (no external forecasting service)
 - Exposes REST endpoints for ingestion, historical data query, and forecast retrieval
 
@@ -82,6 +83,7 @@ Open `http://localhost:5173`.
 ### `POST /ingest?ticker=SYMBOL`
 
 Ingests missing data (or uses cache) and generates/stores forecast.
+If live fetch fails but local history exists, ingestion still succeeds from cache.
 
 Example response:
 
