@@ -30,6 +30,13 @@ using:
 - DB `envFrom` secret: `stock-forecast-db-secrets`
 - DB init script secret: `stock-forecast-db-init`
 
+Optional external ML integration envs (backend secret):
+- `ML_SERVICE_URL`
+- `ML_SERVICE_PUSH_PATH` (default `/ingest`)
+- `ML_SERVICE_STATUS_PATH` (default `/jobs/{job_id}`)
+- `ML_SERVICE_API_KEY`
+- `ML_SERVICE_TIMEOUT_MS`
+
 The DB init script creates the application role/database from secret values.
 It runs only when PostgreSQL initializes a fresh data directory.
 

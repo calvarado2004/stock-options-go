@@ -46,13 +46,19 @@ This returns local analytics computed in-house:
 
 ## 5) Query Advanced Analysis + Optional External ML Enrichment
 
-One-shot ML enrichment:
+Start async ML enrichment:
 
 ```bash
 curl -X POST "http://localhost:8080/ml-analysis?ticker=PSTG"
 ```
 
-Or by query parameter on analysis endpoint:
+If queued, poll status:
+
+```bash
+curl "http://localhost:8080/ml-analysis-status?ticker=PSTG"
+```
+
+Or trigger-and-check from analysis endpoint:
 
 ```bash
 curl "http://localhost:8080/analysis?ticker=PSTG&include_ml=true"
@@ -73,6 +79,30 @@ Expected external ML response contract (from your ML service):
       "Neural model trend is positive",
       "Sentiment score improved"
     ]
+  }
+}
+```
+
+Async job status response can also return recommendation nested under `result`:
+
+```json
+{
+  "job_id": "e5233194c05d46ca9a43b6823674cae3",
+  "ticker": "PSTG",
+  "status": "completed",
+  "result": {
+    "provider": "my-ml-service",
+    "model": "ensemble-v1",
+    "status": "ok",
+    "recommendation": {
+      "action": "HOLD",
+      "confidence": "Low",
+      "score_delta": 0,
+      "rationale": [
+        "Traditional reason 1",
+        "Neural net adjustment=-0.022."
+      ]
+    }
   }
 }
 ```
@@ -99,6 +129,7 @@ External ML bridge (all optional):
 ```bash
 export ML_SERVICE_URL="http://your-ml-service:9000"
 export ML_SERVICE_PUSH_PATH="/ingest"
+export ML_SERVICE_STATUS_PATH="/jobs/{job_id}"
 export ML_SERVICE_API_KEY="your-token"
 export ML_SERVICE_TIMEOUT_MS="10000"
 ```

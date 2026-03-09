@@ -79,6 +79,7 @@ DuPont fundamentals source:
 External ML optional integration:
 - `ML_SERVICE_URL`: base URL for external ML service
 - `ML_SERVICE_PUSH_PATH`: optional push path (default `/ingest`)
+- `ML_SERVICE_STATUS_PATH`: optional status path template (default `/jobs/{job_id}`)
 - `ML_SERVICE_API_KEY`: optional bearer token for external ML API
 - `ML_SERVICE_TIMEOUT_MS`: optional HTTP timeout in ms (default `10000`)
 
@@ -169,9 +170,16 @@ Optional query:
 
 ### `POST /ml-analysis?ticker=SYMBOL`
 
-Forces an external ML push using the current local `forecast` + `analysis` as input.
-Returns the same analysis payload plus `external_ml` metadata and any recommendation adjustments.
-If external ML is not configured, returns `503`.
+Starts external ML flow using current local `forecast` + `analysis` as input.
+- If the ML service returns immediate recommendation, API returns `200` with `analysis`.
+- If the ML service queues work, API returns `202` with `job_id` + `status`.
+- If external ML is not configured, returns `503`.
+
+### `GET /ml-analysis-status?ticker=SYMBOL`
+
+Polls status for the latest ML job started for the ticker.
+- Returns `200` with `status=queued|running|completed|error`.
+- When completed, response includes `analysis` with merged `external_ml` insight.
 
 Expected JSON from external ML service (minimum contract):
 
@@ -185,6 +193,41 @@ Expected JSON from external ML service (minimum contract):
     "confidence": "High",
     "score_delta": 2,
     "rationale": ["Neural trend is positive"]
+  }
+}
+```
+
+Supported completed-status formats from ML service:
+- flat payload (fields at top level)
+- nested payload under `result` (for example `result.recommendation.*`)
+
+Queued async response example from ML service:
+
+```json
+{
+  "job_id": "job-12345",
+  "status": "queued",
+  "message": "job accepted"
+}
+```
+
+Example status response from ML service (nested `result`):
+
+```json
+{
+  "job_id": "e5233194c05d46ca9a43b6823674cae3",
+  "ticker": "PSTG",
+  "status": "completed",
+  "result": {
+    "provider": "my-ml-service",
+    "model": "ensemble-v1",
+    "status": "ok",
+    "recommendation": {
+      "action": "HOLD",
+      "confidence": "Low",
+      "score_delta": 0,
+      "rationale": ["Neural net adjustment=-0.022."]
+    }
   }
 }
 ```

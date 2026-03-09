@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"stock-options/pkg/data"
@@ -24,6 +25,25 @@ type Router struct {
 	dataProvider       data.StockDataProvider
 	secFundamentalsCli *data.SECFundamentalsClient
 	externalMLClient   ml.Client
+	mlMu               sync.RWMutex
+	mlJobs             map[string]*mlJobState
+}
+
+type mlJobState struct {
+	Ticker      string
+	JobID       string
+	Status      string
+	Message     string
+	SubmittedAt time.Time
+	UpdatedAt   time.Time
+}
+
+type mlAnalysisResponse struct {
+	Ticker   string                  `json:"ticker"`
+	JobID    string                  `json:"job_id,omitempty"`
+	Status   string                  `json:"status"`
+	Message  string                  `json:"message,omitempty"`
+	Analysis *model.AdvancedAnalysis `json:"analysis,omitempty"`
 }
 
 type ingestResponse struct {
@@ -56,6 +76,7 @@ func NewRouter() *Router {
 		dataProvider:       dataProvider,
 		secFundamentalsCli: data.NewSECFundamentalsClient(os.Getenv("SEC_USER_AGENT")),
 		externalMLClient:   ml.NewHTTPClientFromEnv(),
+		mlJobs:             make(map[string]*mlJobState),
 	}
 }
 
@@ -63,6 +84,7 @@ func NewRouterWithDependencies(db *storage.Database, provider data.StockDataProv
 	return &Router{
 		db:           db,
 		dataProvider: provider,
+		mlJobs:       make(map[string]*mlJobState),
 	}
 }
 
@@ -72,6 +94,7 @@ func NewRouterWithDependenciesAndClients(db *storage.Database, provider data.Sto
 		dataProvider:       provider,
 		secFundamentalsCli: sec,
 		externalMLClient:   externalML,
+		mlJobs:             make(map[string]*mlJobState),
 	}
 }
 
@@ -83,6 +106,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	router.HandleFunc("/forecast", r.forecastHandler).Methods("GET")
 	router.HandleFunc("/analysis", r.analysisHandler).Methods("GET")
 	router.HandleFunc("/ml-analysis", r.mlAnalysisHandler).Methods("POST")
+	router.HandleFunc("/ml-analysis-status", r.mlAnalysisStatusHandler).Methods("GET")
 	router.HandleFunc("/healthz", r.healthHandler).Methods("GET")
 
 	router.ServeHTTP(w, req)
@@ -260,10 +284,22 @@ func (r *Router) analysisHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	analysis, err := r.buildAnalysis(req.Context(), ticker, parseBool(req.URL.Query().Get("include_ml")))
+	analysis, err := r.buildLocalAnalysis(ticker)
 	if err != nil {
 		http.Error(w, "No advanced analysis available for this ticker", http.StatusNotFound)
 		return
+	}
+	if parseBool(req.URL.Query().Get("include_ml")) {
+		if insight, pending, msg := r.getOrRequestExternalML(req.Context(), ticker, analysis); insight != nil {
+			analysis.ExternalML = insight
+			applyExternalRecommendation(&analysis.Signal, insight)
+		} else if pending {
+			analysis.ExternalML = &model.ExternalMLInsight{
+				Status:      "pending",
+				Message:     msg,
+				RequestedAt: time.Now().UTC(),
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -284,19 +320,107 @@ func (r *Router) mlAnalysisHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	analysis, err := r.buildAnalysis(req.Context(), ticker, true)
+	analysis, err := r.buildLocalAnalysis(ticker)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to build ML analysis for %s: %v", ticker, err), http.StatusBadGateway)
 		return
 	}
+
+	forecastResult, err := r.getForecastForML(ticker)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load forecast for %s: %v", ticker, err), http.StatusBadGateway)
+		return
+	}
+	submit, err := r.externalMLClient.SubmitAnalysisAndForecast(req.Context(), ticker, forecastResult, analysis)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to submit ML analysis for %s: %v", ticker, err), http.StatusBadGateway)
+		return
+	}
+
+	resp := mlAnalysisResponse{
+		Ticker:  ticker,
+		Status:  strings.ToLower(strings.TrimSpace(submit.Status)),
+		Message: strings.TrimSpace(submit.Message),
+	}
+	if resp.Status == "" {
+		resp.Status = "queued"
+	}
+
+	if submit.Insight != nil {
+		analysis.ExternalML = submit.Insight
+		applyExternalRecommendation(&analysis.Signal, submit.Insight)
+		resp.Status = "completed"
+		resp.Analysis = analysis
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	resp.JobID = strings.TrimSpace(submit.JobID)
+	r.setMLJob(ticker, resp.JobID, resp.Status, resp.Message)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(analysis); err != nil {
+	w.WriteHeader(http.StatusAccepted)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
 	}
 }
 
-func (r *Router) buildAnalysis(ctx context.Context, ticker string, includeExternalML bool) (*model.AdvancedAnalysis, error) {
+func (r *Router) mlAnalysisStatusHandler(w http.ResponseWriter, req *http.Request) {
+	ticker := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("ticker")))
+	if ticker == "" {
+		http.Error(w, "Ticker parameter is required", http.StatusBadRequest)
+		return
+	}
+	if r.externalMLClient == nil {
+		http.Error(w, "External ML service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	state, ok := r.getMLJob(ticker)
+	if !ok || strings.TrimSpace(state.JobID) == "" {
+		http.Error(w, "No pending ML job for this ticker", http.StatusNotFound)
+		return
+	}
+
+	statusResult, err := r.externalMLClient.GetJobStatus(req.Context(), state.JobID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to poll ML status for %s: %v", ticker, err), http.StatusBadGateway)
+		return
+	}
+
+	resp := mlAnalysisResponse{
+		Ticker:  ticker,
+		JobID:   state.JobID,
+		Status:  statusResult.Status,
+		Message: statusResult.Message,
+	}
+
+	if statusResult.Insight != nil {
+		analysis, buildErr := r.buildLocalAnalysis(ticker)
+		if buildErr != nil {
+			http.Error(w, fmt.Sprintf("Failed to rebuild analysis for %s: %v", ticker, buildErr), http.StatusBadGateway)
+			return
+		}
+		analysis.ExternalML = statusResult.Insight
+		applyExternalRecommendation(&analysis.Signal, statusResult.Insight)
+		resp.Status = "completed"
+		resp.Analysis = analysis
+		r.setMLJob(ticker, state.JobID, "completed", statusResult.Message)
+	} else {
+		r.setMLJob(ticker, state.JobID, resp.Status, resp.Message)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func (r *Router) buildLocalAnalysis(ticker string) (*model.AdvancedAnalysis, error) {
 	analysis, err := r.db.GenerateAdvancedAnalysis(ticker)
 	if err != nil {
 		return nil, err
@@ -307,36 +431,114 @@ func (r *Router) buildAnalysis(ctx context.Context, ticker string, includeExtern
 			analysis.Signal = forecast.EvaluateTradeSignal(analysis.CurrentPrice, analysis.MonteCarlo, analysis.AR1, analysis.DuPont)
 		}
 	}
-	if !includeExternalML {
-		return analysis, nil
-	}
-
-	insight, err := r.pushToExternalML(ctx, ticker, analysis)
-	if err != nil {
-		analysis.ExternalML = &model.ExternalMLInsight{
-			Status:      "error",
-			Message:     err.Error(),
-			RequestedAt: time.Now().UTC(),
-		}
-		return analysis, nil
-	}
-	analysis.ExternalML = insight
-	applyExternalRecommendation(&analysis.Signal, insight)
 	return analysis, nil
 }
 
-func (r *Router) pushToExternalML(ctx context.Context, ticker string, analysis *model.AdvancedAnalysis) (*model.ExternalMLInsight, error) {
+func (r *Router) getOrRequestExternalML(ctx context.Context, ticker string, analysis *model.AdvancedAnalysis) (*model.ExternalMLInsight, bool, string) {
 	if r.externalMLClient == nil {
-		return nil, fmt.Errorf("external ML service is not configured")
+		return nil, false, ""
 	}
-	forecastResult, err := r.db.GetForecastResult(ticker)
-	if err != nil {
-		forecastResult, err = r.db.GenerateForecast(ticker)
+	if state, ok := r.getMLJob(ticker); ok && strings.TrimSpace(state.JobID) != "" {
+		statusResult, err := r.externalMLClient.GetJobStatus(ctx, state.JobID)
 		if err != nil {
-			return nil, fmt.Errorf("unable to load forecast for external ML request: %w", err)
+			return &model.ExternalMLInsight{
+				Status:      "error",
+				Message:     err.Error(),
+				RequestedAt: time.Now().UTC(),
+			}, false, err.Error()
 		}
+		if statusResult.Insight != nil {
+			r.setMLJob(ticker, state.JobID, "completed", statusResult.Message)
+			return statusResult.Insight, false, statusResult.Message
+		}
+		r.setMLJob(ticker, state.JobID, statusResult.Status, statusResult.Message)
+		return nil, true, pendingMessage(state.JobID, statusResult.Status, statusResult.Message)
 	}
-	return r.externalMLClient.PushAnalysisAndForecast(ctx, ticker, forecastResult, analysis)
+
+	forecastResult, err := r.getForecastForML(ticker)
+	if err != nil {
+		return &model.ExternalMLInsight{
+			Status:      "error",
+			Message:     err.Error(),
+			RequestedAt: time.Now().UTC(),
+		}, false, err.Error()
+	}
+	submit, err := r.externalMLClient.SubmitAnalysisAndForecast(ctx, ticker, forecastResult, analysis)
+	if err != nil {
+		return &model.ExternalMLInsight{
+			Status:      "error",
+			Message:     err.Error(),
+			RequestedAt: time.Now().UTC(),
+		}, false, err.Error()
+	}
+	if submit.Insight != nil {
+		return submit.Insight, false, submit.Message
+	}
+	jobID := strings.TrimSpace(submit.JobID)
+	status := strings.ToLower(strings.TrimSpace(submit.Status))
+	if status == "" {
+		status = "queued"
+	}
+	r.setMLJob(ticker, jobID, status, submit.Message)
+	return nil, true, pendingMessage(jobID, status, submit.Message)
+}
+
+func pendingMessage(jobID, status, message string) string {
+	msg := strings.TrimSpace(message)
+	if msg != "" {
+		return msg
+	}
+	if strings.TrimSpace(jobID) != "" {
+		return fmt.Sprintf("External ML job %s is %s", jobID, status)
+	}
+	return "External ML job is running"
+}
+
+func (r *Router) getForecastForML(ticker string) (*model.ForecastResult, error) {
+	forecastResult, err := r.db.GetForecastResult(ticker)
+	if err == nil {
+		return forecastResult, nil
+	}
+	forecastResult, err = r.db.GenerateForecast(ticker)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load forecast for external ML request: %w", err)
+	}
+	return forecastResult, nil
+}
+
+func (r *Router) getMLJob(ticker string) (*mlJobState, bool) {
+	r.mlMu.RLock()
+	defer r.mlMu.RUnlock()
+	state, ok := r.mlJobs[ticker]
+	if !ok {
+		return nil, false
+	}
+	cpy := *state
+	return &cpy, true
+}
+
+func (r *Router) setMLJob(ticker, jobID, status, message string) {
+	r.mlMu.Lock()
+	defer r.mlMu.Unlock()
+	now := time.Now().UTC()
+	state, ok := r.mlJobs[ticker]
+	if !ok {
+		r.mlJobs[ticker] = &mlJobState{
+			Ticker:      ticker,
+			JobID:       strings.TrimSpace(jobID),
+			Status:      strings.ToLower(strings.TrimSpace(status)),
+			Message:     strings.TrimSpace(message),
+			SubmittedAt: now,
+			UpdatedAt:   now,
+		}
+		return
+	}
+	if strings.TrimSpace(jobID) != "" {
+		state.JobID = strings.TrimSpace(jobID)
+	}
+	state.Status = strings.ToLower(strings.TrimSpace(status))
+	state.Message = strings.TrimSpace(message)
+	state.UpdatedAt = now
 }
 
 func applyExternalRecommendation(signal *model.TradeSignal, insight *model.ExternalMLInsight) {

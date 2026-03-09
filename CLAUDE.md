@@ -57,6 +57,7 @@ Design and implement a backend API that retrieves and stores five years of histo
 - `GET /analysis?ticker=SYMBOL`
 - `GET /analysis?ticker=SYMBOL&include_ml=true` (optional external ML enrichment)
 - `POST /ml-analysis?ticker=SYMBOL`
+- `GET /ml-analysis-status?ticker=SYMBOL`
 - `GET /healthz`
 
 ## Current Implementation Notes
@@ -80,9 +81,11 @@ Design and implement a backend API that retrieves and stores five years of histo
   - Rule-based signal: `BUY` / `HOLD` / `SELL` with reasons/confidence
 - Optional external ML bridge (`pkg/ml`):
   - pushes local `/analysis + /forecast` payload to an external service
+  - supports async ML jobs (`202 queued`) with polling status endpoint
   - ingests external recommendation/rationale to augment the signal
   - env-driven and optional; local analytics still work without it
   - expected ML response includes `recommendation.action|confidence|score_delta|rationale`
+  - parser supports both flat ML responses and nested completion payloads under `result`
 
 ### Kubernetes Hardened Baseline
 

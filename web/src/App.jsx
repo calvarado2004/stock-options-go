@@ -268,6 +268,7 @@ export default function App() {
   const [forecast, setForecast] = useState(null)
   const [analysis, setAnalysis] = useState(null)
   const [analysisError, setAnalysisError] = useState('')
+  const [mlStatus, setMlStatus] = useState('')
   const exportRef = useRef(null)
 
   const load = async () => {
@@ -295,19 +296,60 @@ export default function App() {
         let nextAnalysis = await analysisRes.json()
         let nextAnalysisError = ''
         if (useExternalML) {
+          setMlStatus('submitting')
           const mlRes = await fetch(`${api}/ml-analysis?ticker=${encodeURIComponent(symbol)}`, { method: 'POST' })
-          if (mlRes.ok) {
-            nextAnalysis = await mlRes.json()
+          if (mlRes.status === 202) {
+            const queued = await mlRes.json()
+            setMlStatus(queued?.status || 'queued')
+            const maxPolls = 25
+            let completed = false
+            for (let i = 0; i < maxPolls; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 3000))
+              const statusRes = await fetch(`${api}/ml-analysis-status?ticker=${encodeURIComponent(symbol)}`)
+              if (!statusRes.ok) {
+                nextAnalysisError = `External ML status check failed: ${await statusRes.text()}`
+                setMlStatus('error')
+                break
+              }
+              const statusPayload = await statusRes.json()
+              setMlStatus(statusPayload?.status || 'running')
+              if (statusPayload?.status === 'completed' && statusPayload?.analysis) {
+                nextAnalysis = statusPayload.analysis
+                setMlStatus('completed')
+                completed = true
+                break
+              }
+              if (statusPayload?.status === 'error' || statusPayload?.status === 'failed') {
+                nextAnalysisError = statusPayload?.message || 'External ML analysis failed.'
+                setMlStatus('error')
+                break
+              }
+            }
+            if (!completed && !nextAnalysisError) {
+              nextAnalysisError = 'External ML is still running. Please refresh to get the final result.'
+            }
+          } else if (mlRes.ok) {
+            const mlPayload = await mlRes.json()
+            if (mlPayload?.analysis) {
+              nextAnalysis = mlPayload.analysis
+              setMlStatus('completed')
+            } else {
+              setMlStatus(mlPayload?.status || 'completed')
+            }
           } else {
             const mlMsg = await mlRes.text()
             nextAnalysisError = `External ML unavailable: ${mlMsg || 'service not available.'}`
+            setMlStatus('error')
           }
+        } else {
+          setMlStatus('')
         }
         setAnalysis(nextAnalysis)
         setAnalysisError(nextAnalysisError)
       } else {
         setAnalysis(null)
         setAnalysisError('Advanced analysis is not available for this ticker yet.')
+        setMlStatus('')
       }
     } catch (e) {
       setError(String(e.message || e))
@@ -444,7 +486,7 @@ export default function App() {
         {ingest && <span className="badge">provider_used: {ingest.provider_used}</span>}
         {ingest && <span className="badge">fetched: {ingest.fetched_record_count}</span>}
         {ingest && <span className="badge">cache: {String(ingest.using_cached_data)}</span>}
-        {analysis?.external_ml && <span className="badge">external_ml: {analysis.external_ml.status}</span>}
+        {useExternalML && <span className="badge">external_ml: {mlStatus || analysis?.external_ml?.status || 'idle'}</span>}
       </section>
 
       {error && <section className="panel error">{error}</section>}
