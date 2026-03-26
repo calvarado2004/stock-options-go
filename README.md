@@ -116,11 +116,14 @@ Open `http://localhost:5173`.
 
 ### `POST /ingest?ticker=SYMBOL[&refresh=true]`
 
-Ingests missing data (or uses cache) and generates/stores forecast.
+Ingests missing data and generates/stores forecast.
 If live fetch fails but local history exists, ingestion still succeeds from cache.
-Default behavior is cache-first: if the ticker already exists in DB, it will use local
-data and avoid external provider calls.
-Use `refresh=true` to force an external fetch attempt for newer rows.
+Default behavior is cache-first and incremental:
+- if the ticker is not in DB, it fetches roughly the last 5 years
+- if the ticker already exists, it compares today's date with the latest cached trading date
+- when the cache is behind, it fetches only the missing date gap from `latest_cached_date + 1` to today
+- when the cache is current, it serves from local DB without provider calls
+`refresh=true` still forces an external attempt, but the fetch window remains the missing/newer range for existing tickers.
 
 Example response:
 

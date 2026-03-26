@@ -68,7 +68,10 @@ Design and implement a backend API that retrieves and stores five years of histo
   - Stooq fallback
 - Alpha Vantage is one possible provider among several supported sources
 - Provider calls are serial (no parallel provider fan-out)
-- Ingest is cache-first by default; use `refresh=true` to force external refresh
+- Ingest is cache-first and incremental by default:
+- new tickers fetch roughly 5 years of history
+- existing tickers fetch only the missing dates between latest cached day and today
+- `refresh=true` still forces an external attempt for the newer/missing range
 - Provider HTTP calls use retry/backoff for transient errors (`429`, `5xx`) with pacing delay
 - Storage (`pkg/storage`): configurable DB driver via GORM
   - local fallback: SQLite

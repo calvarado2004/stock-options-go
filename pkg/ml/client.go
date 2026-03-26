@@ -50,6 +50,9 @@ type JobStatusResult struct {
 
 func NewHTTPClient(baseURL, pushPath, statusPath, apiKey string, timeout time.Duration) *HTTPClient {
 	baseURL = strings.TrimSpace(baseURL)
+	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
 	pushPath = strings.TrimSpace(pushPath)
 	if pushPath == "" {
 		pushPath = "/ingest"

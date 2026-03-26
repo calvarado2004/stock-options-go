@@ -146,42 +146,69 @@ func TestIngestFallsBackToCacheWhenProviderFails(t *testing.T) {
 }
 
 type countingProvider struct {
-	calls int
+	calls     int
+	lastStart time.Time
+	lastEnd   time.Time
+}
+
+func buildSyntheticSeries(ticker string, start time.Time, days int) []model.StockData {
+	rows := make([]model.StockData, 0, days)
+	for i := 0; i < days; i++ {
+		d := start.AddDate(0, 0, i).UTC().Truncate(24 * time.Hour)
+		price := 50.0 + float64(i)*0.12
+		adj := price * 1.001
+		rows = append(rows, model.StockData{
+			Ticker:        ticker,
+			TradingDate:   d,
+			OpenPrice:     price - 0.5,
+			HighPrice:     price + 0.8,
+			LowPrice:      price - 0.9,
+			ClosePrice:    price,
+			AdjustedClose: &adj,
+			Volume:        1000 + int64(i),
+		})
+	}
+	return rows
 }
 
 func (m *countingProvider) GetHistoricalData(ticker string, startDate time.Time, endDate time.Time) ([]model.StockData, string, error) {
 	m.calls++
-	return nil, "", fmt.Errorf("should not be called")
+	m.lastStart = startDate
+	m.lastEnd = endDate
+
+	base := startDate.UTC().Truncate(24 * time.Hour)
+	if base.After(endDate) {
+		return []model.StockData{}, "yahoo", nil
+	}
+
+	rows := make([]model.StockData, 0, 5)
+	for i := 0; i < 5; i++ {
+		d := base.AddDate(0, 0, i)
+		if d.After(endDate) {
+			break
+		}
+		price := 70.0 + float64(i)
+		rows = append(rows, model.StockData{
+			Ticker:      ticker,
+			TradingDate: d,
+			OpenPrice:   price - 1,
+			HighPrice:   price + 1,
+			LowPrice:    price - 2,
+			ClosePrice:  price,
+			Volume:      1000 + int64(i),
+		})
+	}
+	return rows, "yahoo", nil
 }
 
-func TestIngestUsesCacheFirstWithoutCallingProvider(t *testing.T) {
+func TestIngestUsesCacheWhenAlreadyCurrentWithoutCallingProvider(t *testing.T) {
 	db, err := storage.NewDatabase(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	adj := 101.0
-	seed := []model.StockData{
-		{
-			Ticker:        "PSTG",
-			TradingDate:   time.Now().UTC().AddDate(-3, 0, 0).Truncate(24 * time.Hour),
-			OpenPrice:     50,
-			HighPrice:     55,
-			LowPrice:      49,
-			ClosePrice:    53,
-			AdjustedClose: &adj,
-			Volume:        1000,
-		},
-		{
-			Ticker:      "PSTG",
-			TradingDate: time.Now().UTC().AddDate(0, 0, -10).Truncate(24 * time.Hour),
-			OpenPrice:   60,
-			HighPrice:   62,
-			LowPrice:    58,
-			ClosePrice:  61,
-			Volume:      2000,
-		},
-	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	seed := buildSyntheticSeries("PSTG", today.AddDate(-2, 0, -40), 771)
 	if err := db.SaveStockData(seed); err != nil {
 		t.Fatalf("failed to seed data: %v", err)
 	}
@@ -212,6 +239,56 @@ func TestIngestUsesCacheFirstWithoutCallingProvider(t *testing.T) {
 	}
 	if payload["using_cached_data"] != true {
 		t.Fatalf("expected using_cached_data true, got %#v", payload["using_cached_data"])
+	}
+}
+
+func TestIngestFetchesOnlyMissingDatesWhenCacheIsStale(t *testing.T) {
+	db, err := storage.NewDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	staleLatest := today.AddDate(0, 0, -3)
+	seed := buildSyntheticSeries("PSTG", today.AddDate(-2, 0, -40), 768)
+	if err := db.SaveStockData(seed); err != nil {
+		t.Fatalf("failed to seed data: %v", err)
+	}
+
+	cp := &countingProvider{}
+	router := NewRouterWithDependencies(db, cp)
+	req, err := http.NewRequest("POST", "/ingest?ticker=PSTG", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if status := recorder.Code; status != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d; body=%s", http.StatusOK, status, recorder.Body.String())
+	}
+	if cp.calls != 1 {
+		t.Fatalf("expected provider calls 1, got %d", cp.calls)
+	}
+
+	expectedStart := staleLatest.AddDate(0, 0, 1)
+	if !cp.lastStart.Equal(expectedStart) {
+		t.Fatalf("expected incremental fetch start %s, got %s", expectedStart.Format("2006-01-02"), cp.lastStart.Format("2006-01-02"))
+	}
+	if !cp.lastEnd.Equal(today) {
+		t.Fatalf("expected incremental fetch end %s, got %s", today.Format("2006-01-02"), cp.lastEnd.Format("2006-01-02"))
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if payload["provider_used"] != "yahoo" {
+		t.Fatalf("expected provider_used yahoo, got %#v", payload["provider_used"])
+	}
+	if payload["using_cached_data"] != false {
+		t.Fatalf("expected using_cached_data false, got %#v", payload["using_cached_data"])
 	}
 }
 

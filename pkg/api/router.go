@@ -121,7 +121,7 @@ func (r *Router) ingestHandler(w http.ResponseWriter, req *http.Request) {
 	forceRefresh := strings.EqualFold(strings.TrimSpace(req.URL.Query().Get("refresh")), "true") ||
 		strings.TrimSpace(req.URL.Query().Get("refresh")) == "1"
 
-	endDate := time.Now().UTC()
+	endDate := time.Now().UTC().Truncate(24 * time.Hour)
 	startDate := endDate.AddDate(-5, 0, 0)
 
 	latestTradingDate, hasData, err := r.db.GetLatestTradingDate(ticker)
@@ -133,12 +133,17 @@ func (r *Router) ingestHandler(w http.ResponseWriter, req *http.Request) {
 	usingCachedData := false
 	fetchStart := startDate
 	if hasData {
-		// Cache-first strategy: if we already have data, prefer local DB unless
-		// caller explicitly requests refresh=true.
-		if !forceRefresh {
+		latestTradingDate = latestTradingDate.UTC().Truncate(24 * time.Hour)
+		nextMissingDate := latestTradingDate.AddDate(0, 0, 1)
+		if nextMissingDate.After(endDate) {
 			usingCachedData = true
 		} else {
-			fetchStart = latestTradingDate.AddDate(0, 0, 1)
+			// Keep cache as primary source, but backfill only the missing gap
+			// between the latest stored trading date and today.
+			fetchStart = nextMissingDate
+		}
+		if forceRefresh && fetchStart.Before(startDate) {
+			fetchStart = startDate
 		}
 	}
 

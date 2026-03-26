@@ -15,7 +15,8 @@ curl -X POST "http://localhost:8080/ingest?ticker=PSTG"
 ```
 
 What this does:
-- retrieves missing historical data for ~last 5 years
+- for a new ticker, retrieves roughly the last 5 years of history
+- for an existing ticker, checks the latest cached trading date and downloads only the missing newer dates
 - stores/upserts rows into SQLite
 - computes forecast locally in `pkg/forecast`
 - stores forecast in DB
