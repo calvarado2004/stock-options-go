@@ -492,13 +492,14 @@ export default function App() {
       {error && <section className="panel error">{error}</section>}
 
       <section className="metrics">
+        <article className="panel metric"><span>Today's Price</span><strong>{analysis ? `$${money(analysis.current_price)}` : '-'}</strong></article>
         <article className="panel metric"><span>Current Year Remaining</span><strong>{forecast ? `$${money(forecast.current_year_remaining_forecast)}` : '-'}</strong></article>
         <article className="panel metric"><span>Next Year</span><strong>{forecast ? `$${money(forecast.next_year_forecast)}` : '-'}</strong></article>
         <article className="panel metric"><span>Year After Next</span><strong>{forecast ? `$${money(forecast.year_after_next_forecast)}` : '-'}</strong></article>
-        <article className="panel metric"><span>Regression Equation</span><strong>{forecast ? `y = ${forecast.regression_slope.toFixed(2)}x + ${forecast.regression_intercept.toFixed(2)}` : '-'}</strong></article>
       </section>
 
       <section className="metrics">
+        <article className="panel metric"><span>Regression Equation</span><strong>{forecast ? `y = ${forecast.regression_slope.toFixed(2)}x + ${forecast.regression_intercept.toFixed(2)}` : '-'}</strong></article>
         <article className="panel metric"><span>Signal</span><strong>{analysis?.signal?.action || '-'}</strong></article>
         <article className="panel metric"><span>Signal Confidence</span><strong>{analysis?.signal?.confidence || '-'}</strong></article>
         <article className="panel metric"><span>Signal Score</span><strong>{analysis?.signal ? String(analysis.signal.score) : '-'}</strong></article>

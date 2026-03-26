@@ -9,6 +9,7 @@ describe('App', () => {
 
   it('renders advanced analytics labels', () => {
     render(<App />)
+    expect(screen.getByText(/today's price/i)).toBeInTheDocument()
     expect(screen.getByText(/ar\(1\) expected 30d/i)).toBeInTheDocument()
     expect(screen.getByText(/mc annual volatility/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/use external ml augmentation/i)).toBeInTheDocument()
